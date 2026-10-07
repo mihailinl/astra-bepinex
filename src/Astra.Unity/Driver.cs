@@ -61,6 +61,8 @@ namespace Astra.Unity
         // Her size from the player's height (MatchPlayerHeight): the size in force, a new one waiting
         // to prove itself steady, and since when.
         float matched = -1, pending, pendingSince;
+        float lastSent; // when the last message went to the engine (unscaled time)
+        static readonly string KeepAlive = Messages.Param(new ParamSet()); // an empty set: changes nothing
 
         Camera main;
         float nextCameraSearch;
@@ -157,6 +159,14 @@ namespace Astra.Unity
                 wasLive = live;
                 Runtime.Connected = live;
                 if (compositor != null) compositor.Show = live && visible && settings.Enabled.Value;
+                // No player (a menu, a loading screen) means nothing to send — and the engine hands her
+                // back to the desktop after 10 s of silence, then the game takes her again: a loop.
+                // While the game runs, it keeps her.
+                if (link != null && link.Ready && Time.unscaledTime - lastSent > 2f)
+                {
+                    link.Send(KeepAlive);
+                    lastSent = Time.unscaledTime;
+                }
                 if (Time.unscaledTime > nextCameraSearch || main == null || !main.isActiveAndEnabled)
                 {
                     main = Camera.main;
@@ -257,6 +267,7 @@ namespace Astra.Unity
                 {
                     matched = pending = wanted; // the first height: at once, before she is seen
                     pendingSince = Time.unscaledTime;
+                    log.LogInfo($"sized to the player: {height:0.00} units tall -> her scale {matched:0.00}");
                     return matched;
                 }
                 if (Mathf.Abs(wanted - pending) > 0.03f * pending)
@@ -264,9 +275,10 @@ namespace Astra.Unity
                     pending = wanted;
                     pendingSince = Time.unscaledTime;
                 }
-                else if (Time.unscaledTime - pendingSince > 1f)
+                else if (Time.unscaledTime - pendingSince > 1f && pending != matched)
                 {
                     matched = pending;
+                    log.LogInfo($"sized to the player: {height:0.00} units tall -> her scale {matched:0.00}");
                 }
             }
             if (matched < 0) return fixedScale;
@@ -382,6 +394,7 @@ namespace Astra.Unity
                     Scale = scale,
                 }, parameters));
                 Send(shots.Message(cam, settings.MaxPictureHeight.Value)); // LAST: it commits the frame
+                lastSent = Time.unscaledTime;
             });
             if (compositor == null || faulted) return;
             // URP 17: her pass goes INTO this camera's render graph (the only place its depth exists).
