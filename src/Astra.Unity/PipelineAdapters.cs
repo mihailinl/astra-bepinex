@@ -101,6 +101,7 @@ namespace Astra.Unity
     {
         static Func<Camera, Compositor, bool> attach;
         static Func<Camera, float> exposure;
+        static Func<Camera, SphericalHarmonicsL2> ambient;
         static Camera attachedTo;
 
         public static string Missing { get; private set; } = "not looked for";
@@ -122,6 +123,8 @@ namespace Astra.Unity
                 Missing = null;
                 try { exposure = Adapters.Method<Func<Camera, float>>("Astra.Hdrp", "Astra.Unity.Hdrp", "Exposure"); }
                 catch (Exception) { exposure = null; } // an older adapter: lights unconverted
+                try { ambient = Adapters.Method<Func<Camera, SphericalHarmonicsL2>>("Astra.Hdrp", "Astra.Unity.Hdrp", "Ambient"); }
+                catch (Exception) { ambient = null; }
             }
             catch (Exception e)
             {
@@ -145,6 +148,23 @@ namespace Astra.Unity
             {
                 exposure = null;
                 return 0;
+            }
+        }
+
+        /// <summary>HDRP's own ambient probe for <paramref name="cam"/> (the sky's, in physical units);
+        /// null when the adapter cannot read it.</summary>
+        public static SphericalHarmonicsL2? Ambient(Camera cam)
+        {
+            if (ambient == null) return null;
+            try
+            {
+                var sh = ambient(cam);
+                return sh == default(SphericalHarmonicsL2) ? (SphericalHarmonicsL2?)null : sh;
+            }
+            catch (Exception)
+            {
+                ambient = null;
+                return null;
             }
         }
 

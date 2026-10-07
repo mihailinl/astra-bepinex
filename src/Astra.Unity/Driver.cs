@@ -63,6 +63,8 @@ namespace Astra.Unity
         // to prove itself steady, and since when.
         float matched = -1, pending, pendingSince;
         float lastSent; // when the last message went to the engine (unscaled time)
+        float nextLightLog;
+        string loggedLight;
         static readonly string KeepAlive = Messages.Param(new ParamSet()); // an empty set: changes nothing
 
         Camera main;
@@ -469,8 +471,21 @@ namespace Astra.Unity
                     var choose = integration?.Sun;
                     Light sun = choose != null ? Guarded("sun", () => choose(), () => null) : null;
                     light.Physical = hdrp;
-                    if (hdrp) light.Exposure = HdrpHook.Exposure(cam);
-                    Send(light.Message(her.Position, HerHeight * scale, ignore, choose != null && integration != null, sun));
+                    if (hdrp)
+                    {
+                        light.Exposure = HdrpHook.Exposure(cam);
+                        light.PipelineAmbient ??= () => HdrpHook.Ambient(main);
+                    }
+                    Send(light.Message(her.Position, HerHeight * scale, ignore, choose != null && integration != null, sun,
+                        cam, frame.Player?.Root));
+                    // What she is lit with, every 10 s when it changed: the line a player pastes when she
+                    // looks wrong.
+                    if (Time.unscaledTime > nextLightLog && light.Summary != null && light.Summary != loggedLight)
+                    {
+                        log.LogInfo("her light here: " + light.Summary);
+                        loggedLight = light.Summary;
+                        nextLightLog = Time.unscaledTime + 10f;
+                    }
                 }
                 SendCues(frame.Cues);
                 if (integration != null) SendCues(integration.Cues);

@@ -46,15 +46,29 @@ namespace Astra.Unity
         static float nextRead;
         static MethodInfo exposureTexture;
         static bool noExposure;
+        static float log2Exposure;
+        static bool hasLog2;
+        static float lastReadbackAt = -1;
+        static Camera lastCamera;
+        static float cameraChangedAt = -100;
 
         /// <summary>
         /// The camera's current EXPOSURE multiplier: HDRP's lights are in physical units (lux,
         /// candela) and its picture is exposed, so her light is brought to the picture's scale with
         /// it. HDRP keeps it on the GPU (a 1×1 texture its shaders read, <c>GetCurrentExposureMultiplier</c>);
-        /// it is read back a few times a second. 0 until known. Called by reflection.
+        /// it is read back a few times a second, smoothed in LOG2 with a 3 s time constant (a jump
+        /// cut's exposure should ease like the game's own auto-exposure, not snap). A reading taken
+        /// within 1 s of a camera CHANGE is dropped: HDRP's texture (and its history) briefly still
+        /// reflects the old camera, and folding that in would yank her light toward it. 0 until the
+        /// first valid reading. Called by reflection.
         /// </summary>
         static float Exposure(Camera cam)
         {
+            if (cam != lastCamera)
+            {
+                lastCamera = cam;
+                cameraChangedAt = Time.unscaledTime;
+            }
             if (!reading && !noExposure && cam != null && Time.unscaledTime >= nextRead)
             {
                 nextRead = Time.unscaledTime + 0.25f;
@@ -76,11 +90,48 @@ namespace Astra.Unity
                         var v = r.GetData<Vector2>()[0];
                         // (1, 0) is HDRP's EMPTY exposure texture (a camera cut, a history reset):
                         // not an exposure, keep the last.
-                        if (v.x > 0 && !float.IsInfinity(v.x) && !(v.x == 1 && v.y == 0)) exposure = v.x;
+                        if (!(v.x > 0 && !float.IsInfinity(v.x) && !(v.x == 1 && v.y == 0))) return;
+                        if (Time.unscaledTime - cameraChangedAt < 1f) return; // still the old camera's history
+                        float target = Mathf.Log(v.x, 2);
+                        float now = Time.unscaledTime;
+                        if (!hasLog2)
+                        {
+                            log2Exposure = target;
+                            hasLog2 = true;
+                        }
+                        else
+                        {
+                            float dt = Mathf.Max(0, now - lastReadbackAt);
+                            log2Exposure += (target - log2Exposure) * (1 - Mathf.Exp(-dt / 3f));
+                        }
+                        lastReadbackAt = now;
+                        exposure = Mathf.Pow(2, log2Exposure);
                     });
                 }
             }
             return exposure > 0 ? exposure : 0;
+        }
+
+        static FieldInfo skyManager;
+        static MethodInfo ambientProbe;
+
+        /// <summary>
+        /// HDRP's AMBIENT light for <paramref name="cam"/> — the sky's probe it lights every moving thing
+        /// with where no light probe reaches. HDRP does not keep <c>RenderSettings.ambientProbe</c>, so
+        /// that one reads black, and she went black wherever the sun did not reach her. Physical units,
+        /// as the game's own lights. All zero when it cannot be read. Called by reflection
+        /// (<c>SkyManager.GetAmbientProbe(HDCamera)</c> is internal, HDRP 10–17).
+        /// </summary>
+        static SphericalHarmonicsL2 Ambient(Camera cam)
+        {
+            var pipeline = RenderPipelineManager.currentPipeline as HDRenderPipeline;
+            if (pipeline == null || cam == null) return default;
+            skyManager ??= typeof(HDRenderPipeline).GetField("m_SkyManager", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var sky = skyManager?.GetValue(pipeline);
+            if (sky == null) return default;
+            ambientProbe ??= sky.GetType().GetMethod("GetAmbientProbe",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(HDCamera) }, null);
+            return ambientProbe?.Invoke(sky, new object[] { HDCamera.GetOrCreate(cam) }) is SphericalHarmonicsL2 sh ? sh : default;
         }
 
         sealed class AstraPass : CustomPass

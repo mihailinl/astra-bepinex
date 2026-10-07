@@ -206,7 +206,7 @@ namespace Astra.Unity
                 player = Find(cam, configured);
             }
             if (player != null)
-                return new PlayerInfo { Feet = player.transform.position, Root = player.transform.root.gameObject, Grounded = true };
+                return new PlayerInfo { Feet = player.transform.position, Root = player, Grounded = true };
             var eye = cam.transform.position;
             var feet = Compat.Raycast(eye, Vector3.down, 3f, mask, NoIgnore, out var ground) ? ground.point : eye + Vector3.down * 1.6f;
             return new PlayerInfo { Feet = feet, Grounded = true };

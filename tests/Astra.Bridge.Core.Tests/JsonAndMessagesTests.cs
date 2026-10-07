@@ -126,6 +126,63 @@ public class JsonAndMessagesTests
         Assert.Null(Messages.Light(null, null, null, new[] { new Lamp { Pos = new Vec3(double.NaN, 0, 0), Range = 1, Color = new Vec3(1, 1, 1) } }));
     }
 
+    /// <summary>Every new field in one exact message: extra suns, where the ambient came from and how
+    /// open the sky is, a held lamp, and the look builder support.</summary>
+    [Fact]
+    public void light_carries_the_new_facts()
+    {
+        var sun = new Sun { Dir = new Vec3(0, 1, 0), Color = new Vec3(1, 1, 1), Intensity = 1, Visible = 1 };
+        var extra = new Sun { Dir = new Vec3(1, 0, 0), Color = new Vec3(1, 0.5, 0.2), Intensity = 0.3, Visible = 0.8 };
+        var cube = new Vec3[6];
+        for (int i = 0; i < 6; i++) cube[i] = new Vec3(0.1, 0.1, 0.1);
+        var lamps = new[] { new Lamp { Pos = new Vec3(1, 2, 3), Range = 8, Color = new Vec3(1, 1, 1), Intensity = 5, Held = true } };
+        var look = new Look { Floor = 0.1, Ceiling = 1.5 };
+        var json = Messages.Light(sun, new Vec3(0.2, 0.2, 0.2), cube, lamps, "global", 0.333, new[] { extra }, look);
+        Assert.Equal(
+            "{\"t\":\"light\",\"sun\":{\"dir\":[0,1,0],\"color\":[1,1,1],\"intensity\":1,\"visible\":1}," +
+            "\"suns\":[{\"dir\":[1,0,0],\"color\":[1,0.5,0.2],\"intensity\":0.3,\"visible\":0.8}]," +
+            "\"ambient\":[0.2,0.2,0.2]," +
+            "\"ambientCube\":[0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1]," +
+            "\"ambientSrc\":\"global\",\"open\":0.33," +
+            "\"lamps\":[{\"pos\":[1,2,3],\"range\":8,\"color\":[1,1,1],\"intensity\":5,\"held\":true}]," +
+            "\"look\":{\"floor\":0.1,\"ceiling\":1.5}}",
+            json);
+    }
+
+    /// <summary>The two older overloads bind unchanged and still write exactly today's JSON — the new
+    /// fields are additive, never a breaking change to a mod built against them.</summary>
+    [Fact]
+    public void the_older_light_overloads_still_write_todays_json()
+    {
+        var sun = new Sun { Dir = new Vec3(0, 1, 0), Color = new Vec3(1, 0.9, 0.8), Intensity = 40, Visible = 2 };
+        Assert.Equal(
+            "{\"t\":\"light\",\"sun\":{\"dir\":[0,1,0],\"color\":[1,0.9,0.8],\"intensity\":16,\"visible\":1},\"ambient\":[0.2,0.2,0.3]}",
+            Messages.Light(sun, new Vec3(0.2, 0.2, 0.3)));
+        Assert.Equal("{\"t\":\"light\"}", Messages.Light(null, null));
+
+        var cube = new[] { new Vec3(0, 0, 0), new Vec3(0.1, 0, 0), new Vec3(0.2, 0, 0), new Vec3(0.3, 0, 0), new Vec3(0.4, 0, 0), new Vec3(20, 0, 0) };
+        var lamps = new[] { new Lamp { Pos = new Vec3(1, 2, 3), Range = 8, Color = new Vec3(1, 0.8, 0.5), Intensity = 12.5 } };
+        Assert.Equal(
+            "{\"t\":\"light\",\"ambientCube\":[0,0,0,0.1,0,0,0.2,0,0,0.3,0,0,0.4,0,0,16,0,0]," +
+            "\"lamps\":[{\"pos\":[1,2,3],\"range\":8,\"color\":[1,0.8,0.5],\"intensity\":12.5}]}",
+            Messages.Light(null, null, cube, lamps));
+    }
+
+    [Fact]
+    public void light_refuses_an_unknown_ambientsrc_too_many_suns_or_a_non_finite_extra_sun()
+    {
+        var sun = new Sun { Dir = new Vec3(0, 1, 0), Color = new Vec3(1, 1, 1), Intensity = 1, Visible = 1 };
+        Assert.Null(Messages.Light(sun, null, null, null, "bright", null, null, null));
+        Assert.Contains("ambientSrc", Messages.Rejection);
+
+        var good = new Sun { Dir = new Vec3(1, 0, 0), Color = new Vec3(1, 1, 1), Intensity = 1, Visible = 1 };
+        Assert.Null(Messages.Light(sun, null, null, null, null, null, new[] { good, good, good, good }, null));
+        Assert.Contains("suns", Messages.Rejection);
+
+        var bad = new Sun { Dir = new Vec3(double.NaN, 0, 0), Color = new Vec3(1, 1, 1), Intensity = 1, Visible = 1 };
+        Assert.Null(Messages.Light(sun, null, null, null, null, null, new[] { bad }, null));
+    }
+
     [Fact]
     public void the_hello_says_which_shadow_it_reads_only_when_told()
     {

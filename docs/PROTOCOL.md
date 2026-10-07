@@ -78,7 +78,9 @@ is refused (browsers are not allowed in); native clients do not send one.
 {"t":"resume"}                             // hand her back to the graph's default state
 {"t":"light","sun":{"dir":[x,y,z],"color":[r,g,b],"intensity":1.0,"visible":1.0},"ambient":[r,g,b],
  "ambientCube":[r,g,b, r,g,b, r,g,b, r,g,b, r,g,b, r,g,b],
- "lamps":[{"pos":[x,y,z],"range":8,"color":[r,g,b],"intensity":12.5,"spot":{"dir":[x,y,z],"cos":[0.9,0.97]}}]}
+ "lamps":[{"pos":[x,y,z],"range":8,"color":[r,g,b],"intensity":12.5,"spot":{"dir":[x,y,z],"cos":[0.9,0.97]},"held":false}],
+ "ambientSrc":"global","open":0.4,"suns":[{"dir":[x,y,z],"color":[r,g,b],"intensity":0.3,"visible":1.0}],
+ "look":{"floor":0.2,"ceiling":1.4}}
 ```
 
 - **`hello`'s `shadow`** (optional) — which of her two shadows you read, because each costs the engine
@@ -152,23 +154,42 @@ is refused (browsers are not allowed in); native clients do not send one.
   0.08 she stands. `airborne` puts her in **`air`**; landing while still moving goes straight back
   into her stride, landing standing plays the landing. The clips are IN PLACE: you move her (`pos`),
   the clip moves her legs.
-- **`light`** — the light of your world around her. `sun.dir` is the unit direction TOWARD the
-  sun (glTF world; it is turned into her frame, so a tilted vehicle tilts it across her); `color`
-  linear RGB, normalised; `intensity` against her own key light's budget (1 ≈ a daytime sun, 0..16);
-  `visible` 0..1 is how much of her the sun reaches — YOUR occlusion (a rock, a roof), which her own
-  self-shadow cannot see. `ambient` is the linear sky/environment colour her shadowed side becomes.
-  Either part may be left out (hers is kept); `{"t":"light"}` with neither hands her back her own
-  light. It replaces her key light for the shading AND her self-shadow (hair on her face follows
-  your sun). It holds until the next `light` — send it on change or at ~10 Hz.
-  - **`ambientCube`** (optional) — the ambient light BY DIRECTION where she stands: what a surface
-    facing world +X, −X, +Y, −Y, +Z, −Z receives, 18 numbers (six linear RGB, same scale as
-    `ambient`). Read it off your light probes at her chest (Unity: `LightProbes.GetInterpolatedProbe`
-    evaluated in the six directions): a tunnel is dark, a lit floor lights her from below, the wall
-    behind her does not glow. It wins over `ambient`; send `ambient` too (the cube's mean) for an
-    engine from before the cube. While a `light` is held she is lit as a MToon character in your
-    world: the ambient lights her lit albedo (MToon's GI), so with no sun there is no shade band of
-    a sun that is not there; her rim and matcap follow the light, so nothing of her glows in a dark
-    corner. Desktop lighting is untouched.
+- **`light`** — the light of your world around her. Send what your engine KNOWS, raw; the engine
+  makes it into ONE light for her whole body — a level held inside a band, a lit and a shade
+  colour and a direction — measured at her chest, eased the way an eye adapts (brighter in about a
+  third of a second, darker in about one), and never dependent on your camera: turning it never
+  changes her. Why one light and not each lamp per pixel: your light data is taken before your
+  exposure, fog and grading, often partial, and her picture lands after all three — a bounded
+  per-object light (what VRChat's avatar shaders do) reads right in every game, including the ones
+  whose data is wrong. She is never black (the band's floor, a dim figure where your data says
+  darkness) and never blown out (its soft ceiling, and a roll-off of her highlights); her ink line
+  and a flat rim take her light's LEVEL, never its colour (a material authored to follow the light
+  follows its bounded, partly greyed colour). A sun above her horizon is her key exactly, so her
+  self-shadow and her sun view (below) are cast along it. Desktop lighting is untouched. It holds
+  until the next `light` — send it on change or at ~10 Hz; `{"t":"light"}` with nothing in it
+  hands her back her own light.
+  - **`sun`** — your main directional light. `dir` is the unit direction TOWARD it (glTF world);
+    `color` linear RGB, normalised; `intensity` 0..16 (1 ≈ a daytime sun against her own key);
+    `visible` 0..1 how much of her it reaches — YOUR occlusion (a rock, a roof), which her own
+    self-shadow cannot see: send it raw, the engine eases it.
+  - **`suns`** (optional, at most 3) — your OTHER directional lights (a fill light), each with its
+    own `visible`.
+  - **`ambient`** — the linear sky/environment light around her, one colour. **`ambientCube`**
+    (optional) — the same BY DIRECTION, what a surface facing world +X, −X, +Y, −Y, +Z, −Z receives,
+    18 numbers on the same scale; read it off your light probes at her chest (Unity:
+    `LightProbes.GetInterpolatedProbe` evaluated in the six directions). It wins over `ambient` for
+    her level; its SHAPE moves her surfaces at most ±15% in luminance, never her colour.
+  - **`ambientSrc`** — where your ambient came from: `"local"` (a probe at her — it already knows the
+    roof over her), `"global"` (one value for the whole scene, the sky's: the same in a house as
+    outdoors) or `"none"` (you could read nothing; with a sun the engine estimates the sky from it).
+    A message that carries `ambientSrc`, `ambientCube`, `lamps` or `suns` describes your WHOLE
+    light: a part left out is absent — no `sun` is no sun (a cave), and
+    `{"t":"light","ambientSrc":"none"}` alone is a world with no light at all (the band's floor,
+    not her own light back). Only a message of `sun` and `ambient` alone (an older client's) keeps
+    her own key or her own fill colour where it leaves one out. Absent `ambientSrc` = `local`.
+  - **`open`** (optional, 0..1) — the share of the sky open above her (rays up that meet nothing
+    casting a shadow). It closes a GLOBAL sky under a roof (down to 30% of it) — only where a sun
+    says there is a sky, now or earlier in the session. Absent = open.
   - **`lamps`** (optional, at most 8, strongest first) — the point and spot lights that reach her,
     none behind a wall (test that yourself). Light at a distance `d` is
     `color · intensity / d² · clamp(1 − (d/range)⁴, 0, 1)²` — the inverse square that reaches zero
@@ -177,11 +198,13 @@ is refused (browsers are not allowed in); native clients do not send one.
     points. `intensity` is on the sun's scale (a lamp whose `intensity/d²` is 1 at her lights her
     like a sun of 1), 0..10000; `range` metres, > 0. A pipeline with another falloff (Unity's
     Built-in) sends the intensity that makes this law give, at her chest, what its own gives there.
-    Each lamp lights her through the toon ramp toward its own direction; the side turned from it
-    keeps a fifth of its light in her shade colour (the bounce off your walls), as the side turned
-    from your sun keeps about a third. They cast no shadow on her. An empty or absent `lamps` = none
-    now. Do not send a light your probes already carry (Unity: a Baked one) — it would light her
-    twice.
+    Each is measured ONCE at her chest. **`held`** — the player holds it (a flashlight on the
+    camera): its light follows where the player looks, so it does not light her (the engine's
+    `WGPU_WORLD_HELD` weighs it back in for an A/B). Do not send a light your probes already carry
+    (Unity: a Baked one) — it would light her twice.
+  - **`look`** (optional) — your game's taste for her band: `floor` 0.05..0.40 (the dimmest she gets,
+    default 0.20) and `ceiling` 0.8..2.0 (the brightest she approaches, default 1.40), as multiples
+    of her albedo. Absent = the engine's. Set it only where a live look at your game asks for it.
 - **When your game lets go of her** — it closes, crashes, or sends nothing for 10 s — every
   parameter it set returns to its default, if it cued her graph she returns to its default state,
   and if it lit her she gets her own light back. The next game finds her standing.
@@ -285,7 +308,7 @@ caster (flag 64)  at slot data + (+112), 16-aligned after the sun view (or after
   2026-10-05).
 - Depth-test both ways: show her pixel where `her_depth < your_depth + bias` (a few cm).
 - She is already lit (MToon, her own key light and shadows). Do not relight her as if she were
-  unlit albedo — send `light` instead and the engine lights her with your sun and sky.
+  unlit albedo — send `light` instead and the engine lights her with your sun, sky and lamps.
 - **Her shadow on your ground** comes from your side, and the engine gives you what it needs: while
   a `light` with a sun above the horizon (and `intensity·visible > 0`) lights her, every frame
   carries her VIEW FROM THE SUN in plane 3 (flag 32) — an orthographic depth render of her from

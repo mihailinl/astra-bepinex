@@ -114,6 +114,10 @@ namespace Astra.Bridge
         public bool Spot;
         public Vec3 Aim;
         public double CosOuter, CosInner;
+        /// <summary>True when the game can tell this light is carried (the camera, the player, or
+        /// within arm's reach of either) rather than bolted to the world; omitted on the wire when
+        /// false.</summary>
+        public bool Held;
     }
 
     public struct Sun
@@ -126,6 +130,13 @@ namespace Astra.Bridge
         public double Intensity;
         /// <summary>0..1: how much of her the sun reaches (the game's occlusion — a roof, a rock).</summary>
         public double Visible;
+    }
+
+    /// <summary>Where her gaze should keep to, vertically, for <c>light</c>'s <c>look</c>. Builder
+    /// support only for now — nothing sends it yet; the engine side is still being built.</summary>
+    public struct Look
+    {
+        public double Floor, Ceiling;
     }
 
     /// <summary>Where she stands, for <c>avatar</c>.</summary>
@@ -160,6 +171,9 @@ namespace Astra.Bridge
 
         /// <summary>The most lamps one <c>light</c> may carry.</summary>
         public const int MaxLamps = 8;
+
+        /// <summary>The most EXTRA directional lights one <c>light</c> may carry, besides <c>sun</c>.</summary>
+        public const int MaxSuns = 3;
 
         /// <summary>A light level the engine takes: 0..16.</summary>
         static double Level(double v) => Math.Max(0, Math.Min(16, v));
@@ -269,7 +283,26 @@ namespace Astra.Bridge
         /// <param name="cube">The ambient on a surface facing +X, −X, +Y, −Y, +Z, −Z (the bridge's axes):
         /// six colours, or null.</param>
         /// <param name="lamps">At most eight point and spot lights, strongest first; null or empty = none.</param>
-        public static string Light(Sun? sun, Vec3? ambient, Vec3[] cube, IList<Lamp> lamps)
+        public static string Light(Sun? sun, Vec3? ambient, Vec3[] cube, IList<Lamp> lamps) =>
+            Light(sun, ambient, cube, lamps, null, null, null, null);
+
+        /// <param name="sun">The key light; null = hers.</param>
+        /// <param name="ambient">One ambient colour; null = hers (or the cube's, for an engine that knows it).</param>
+        /// <param name="cube">The ambient on a surface facing +X, −X, +Y, −Y, +Z, −Z (the bridge's axes):
+        /// six colours, or null.</param>
+        /// <param name="lamps">At most eight point and spot lights, strongest first; null or empty = none.</param>
+        /// <param name="ambientSrc">Where <paramref name="cube"/> came from: <c>"local"</c> (light
+        /// probes at her own point — what the game's own characters get there), <c>"global"</c> (one
+        /// scene-wide value), <c>"none"</c> (a physical pipeline, HDRP, with neither — the cube is all
+        /// zero); null = not said.</param>
+        /// <param name="open">0..1: the share of the sky above her that is open (no shadow caster
+        /// within 60 units), for an engine filling in its own sky estimate when
+        /// <paramref name="ambientSrc"/> is not local; null = not said.</param>
+        /// <param name="suns">Up to three EXTRA realtime directional lights besides <paramref name="sun"/>,
+        /// strongest first, each validated and clamped the same way; null or empty = none.</param>
+        /// <param name="look">Where her gaze should keep to, vertically; null = not said (builder
+        /// support only — nothing sends this yet).</param>
+        public static string Light(Sun? sun, Vec3? ambient, Vec3[] cube, IList<Lamp> lamps, string ambientSrc, double? open, IList<Sun> suns, Look? look)
         {
             var w = Begin("light");
             if (sun.HasValue)
@@ -277,10 +310,23 @@ namespace Astra.Bridge
                 var s = sun.Value;
                 if (!Direction(s.Dir) || !s.Color.IsFinite || !Vec3.Finite(s.Intensity) || !Vec3.Finite(s.Visible))
                     return Reject("light: a non-finite sun");
-                w.Open("sun").Vec("dir", s.Dir).Vec("color", s.Color)
-                    .Num("intensity", Math.Max(0, Math.Min(16, s.Intensity)))
-                    .Num("visible", Math.Max(0, Math.Min(1, s.Visible)))
-                    .Close();
+                w.Open("sun");
+                WriteSunFields(w, s);
+                w.Close();
+            }
+            if (suns != null && suns.Count > 0)
+            {
+                if (suns.Count > MaxSuns) return Reject($"light: {suns.Count} extra suns, at most {MaxSuns}");
+                w.OpenArray("suns");
+                foreach (var extra in suns)
+                {
+                    if (!Direction(extra.Dir) || !extra.Color.IsFinite || !Vec3.Finite(extra.Intensity) || !Vec3.Finite(extra.Visible))
+                        return Reject("light: a non-finite extra sun");
+                    w.Item();
+                    WriteSunFields(w, extra);
+                    w.Close();
+                }
+                w.CloseArray();
             }
             if (ambient.HasValue)
             {
@@ -300,6 +346,17 @@ namespace Astra.Bridge
                 }
                 w.Nums("ambientCube", faces, 18);
             }
+            if (ambientSrc != null)
+            {
+                if (ambientSrc != "local" && ambientSrc != "global" && ambientSrc != "none")
+                    return Reject($"light: ambientSrc '{ambientSrc}' is none of local/global/none");
+                w.Str("ambientSrc", ambientSrc);
+            }
+            if (open.HasValue)
+            {
+                if (!Vec3.Finite(open.Value)) return Reject("light: a non-finite open");
+                w.Num("open", Math.Round(Math.Max(0, Math.Min(1, open.Value)), 2));
+            }
             if (lamps != null && lamps.Count > 0)
             {
                 if (lamps.Count > MaxLamps) return Reject($"light: {lamps.Count} lamps, at most {MaxLamps}");
@@ -317,11 +374,28 @@ namespace Astra.Bridge
                         double outer = Math.Max(-1, Math.Min(1, l.CosOuter)), inner = Math.Max(outer, Math.Min(1, l.CosInner));
                         w.Open("spot").Vec("dir", l.Aim).Nums("cos", new[] { outer, inner }, 2).Close();
                     }
+                    if (l.Held) w.Bool("held", true);
                     w.Close();
                 }
                 w.CloseArray();
             }
+            if (look.HasValue)
+            {
+                var lk = look.Value;
+                if (!Vec3.Finite(lk.Floor) || !Vec3.Finite(lk.Ceiling)) return Reject("light: a non-finite look");
+                double floor = Math.Max(0.05, Math.Min(0.40, lk.Floor)), ceiling = Math.Max(0.8, Math.Min(2.0, lk.Ceiling));
+                w.Open("look").Num("floor", floor).Num("ceiling", ceiling).Close();
+            }
             return End(w);
+        }
+
+        /// <summary>A sun's 4 fields, shared by <c>sun</c> and every <c>suns</c> item: same units, same
+        /// clamps.</summary>
+        static void WriteSunFields(JsonWriter w, Sun s)
+        {
+            w.Vec("dir", s.Dir).Vec("color", s.Color)
+                .Num("intensity", Math.Max(0, Math.Min(16, s.Intensity)))
+                .Num("visible", Math.Max(0, Math.Min(1, s.Visible)));
         }
 
         static JsonWriter Begin(string type)
