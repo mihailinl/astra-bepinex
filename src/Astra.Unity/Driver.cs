@@ -41,6 +41,7 @@ namespace Astra.Unity
         FrameRing ring;
         int ringSession;
         Compositor compositor;
+        ShadowCaster shadow;
         readonly CameraFeed shots = new CameraFeed();
         readonly LightFeed light = new LightFeed();
         readonly ParamSet parameters = new ParamSet();
@@ -103,29 +104,40 @@ namespace Astra.Unity
                 }
                 compositor = Compositor.Create();
                 if (compositor == null) log.LogError($"Astra cannot be drawn in this game: {Compositor.Failure}");
-                else compositor.Bind(shots, settings);
-                srp = GraphicsSettings.currentRenderPipeline != null;
-                hdrp = srp && GraphicsSettings.currentRenderPipeline.GetType().Name.StartsWith("HDRenderPipeline", StringComparison.Ordinal);
-                if (hdrp && compositor != null)
+                else
                 {
-                    // HDRP keeps its depth as a mip-pyramid atlas array this pass cannot read as it is.
-                    compositor.DepthTest = false;
-                    log.LogWarning("HDRP: she is drawn over everything for now (no depth test against the game yet)");
+                    compositor.Bind(shots, settings, ViewOf);
+                    compositor.Note = m => log.LogInfo("compositor: " + m);
                 }
+                shadow = new ShadowCaster { Note = m => log.LogInfo(m) };
+                srp = GraphicsSettings.currentRenderPipeline != null;
+                string pipeline = Compat.PipelineClass();
+                hdrp = srp && pipeline != null && pipeline.EndsWith(".HDRenderPipelineAsset", StringComparison.Ordinal);
                 UrpHook.TryLoad();
+                HdrpHook.TryLoad();
+                if (hdrp && !HdrpHook.Active && compositor != null)
+                {
+                    // Without its adapter, HDRP's depth (a mip-pyramid atlas array) cannot be read.
+                    compositor.DepthTest = false;
+                    log.LogWarning($"HDRP without its adapter ({HdrpHook.Missing}): she is drawn over everything");
+                }
                 if (srp)
                 {
                     Compat.HookSrp(OnBeginCamera, OnEndCamera);
                     contextEnd = Compat.HookSrpContextEnd(OnEndContext);
                 }
                 else Compat.HookBuiltIn(OnBuiltInPreCull);
-                log.LogInfo(UrpHook.Active ? "compositing inside URP 17's render graph"
-                    : $"compositing after {(contextEnd ? "the frame's cameras" : "the camera")} ({UrpHook.Missing})");
+                log.LogInfo(UrpHook.Active ? $"compositing inside the camera's URP 17 render ({(UrpHook.RenderGraph ? "render graph" : "Compatibility Mode")}), after post-processing"
+                    : HdrpHook.Active ? "compositing in an HDRP custom pass, against the camera's depth buffer"
+                    : $"compositing after {(contextEnd ? "the frame's cameras" : "the camera")} ({(hdrp ? HdrpHook.Missing : UrpHook.Missing)})");
                 log.LogInfo($"{Application.productName} (Unity {Application.unityVersion}, {SystemInfo.graphicsDeviceType}, " +
-                            $"{(srp ? GraphicsSettings.currentRenderPipeline.GetType().Name : "Built-in pipeline")})");
+                            $"{(srp ? Compat.PipelineClass() : "Built-in pipeline")})");
                 link = new BridgeLink("astra-unity/" + Application.productName, settings.Port.Value,
                     string.IsNullOrEmpty(settings.Token.Value) ? null : settings.Token.Value);
                 link.Log = m => log.LogInfo(m);
+                // Her shadow here is the game's own, cast by her caster: the engine need not make her
+                // view from the sun (and makes neither when shadows are off).
+                link.Shadow = settings.Shadows.Value ? "caster" : "none";
                 link.Start();
             });
         }
@@ -155,7 +167,11 @@ namespace Astra.Unity
                 bool live = link != null && link.Ready && ring != null;
                 // The engine went away: forget her last picture, or it would stay composited — a
                 // frozen cut-out at her old place — until it comes back.
-                if (wasLive && !live) compositor?.Reset();
+                if (wasLive && !live)
+                {
+                    compositor?.Reset();
+                    shadow?.Reset(0);
+                }
                 wasLive = live;
                 Runtime.Connected = live;
                 if (compositor != null) compositor.Show = live && visible && settings.Enabled.Value;
@@ -167,7 +183,13 @@ namespace Astra.Unity
                     link.Send(KeepAlive);
                     lastSent = Time.unscaledTime;
                 }
-                if (Time.unscaledTime > nextCameraSearch || main == null || !main.isActiveAndEnabled)
+                AdoptIntegration();
+                var pick = integration?.CameraLocator;
+                if (pick != null)
+                {
+                    main = Guarded("camera", () => pick(), () => Camera.main);
+                }
+                else if (Time.unscaledTime > nextCameraSearch || main == null || !main.isActiveAndEnabled)
                 {
                     main = Camera.main;
                     nextCameraSearch = Time.unscaledTime + 1f;
@@ -179,13 +201,21 @@ namespace Astra.Unity
         /// <summary>One frame: locate the player, let the integration set facts, let the brain place her.</summary>
         void RunFrame(Camera cam)
         {
-            AdoptIntegration();
             var d = integration?.Defaults;
-            string layers = Settings.Pick(settings.GroundLayers, d?.GroundLayers);
-            if (layers != maskLayers)
+            bool playerSetLayers = settings.GroundLayers.Value != (string)settings.GroundLayers.DefaultValue;
+            if (!playerSetLayers && d?.GroundMask != null)
             {
-                maskLayers = layers;
-                mask = Mask(layers);
+                mask = d.GroundMask.Value;
+                maskLayers = null;
+            }
+            else
+            {
+                string layers = Settings.Pick(settings.GroundLayers, d?.GroundLayers);
+                if (layers != maskLayers || maskLayers == null)
+                {
+                    maskLayers = layers ?? "";
+                    mask = Mask(layers);
+                }
             }
             frame.DeltaTime = Time.deltaTime;
             frame.Camera = cam;
@@ -275,7 +305,7 @@ namespace Astra.Unity
                     pending = wanted;
                     pendingSince = Time.unscaledTime;
                 }
-                else if (Time.unscaledTime - pendingSince > 1f && pending != matched)
+                else if (Time.unscaledTime - pendingSince > 1f && Mathf.Abs(pending - matched) > 0.03f * matched)
                 {
                     matched = pending;
                     log.LogInfo($"sized to the player: {height:0.00} units tall -> her scale {matched:0.00}");
@@ -293,6 +323,8 @@ namespace Astra.Unity
             var current = AstraSdk.Current;
             if (current == integration || ReferenceEquals(current, dropped)) return;
             integration = current;
+            extraCameras.Clear(); // the cameras it wanted her in are its own answer
+            views.Clear();
             if (current != null) log.LogInfo($"integration '{current.Id}' for {current.Game} is in charge");
         }
 
@@ -327,6 +359,8 @@ namespace Astra.Unity
                 log.LogError($"the integration '{integration?.Id}' failed ({what}) and is switched off; Astra goes on with her defaults: {e}");
                 dropped = integration;
                 integration = null;
+                extraCameras.Clear(); // the cameras it wanted her in were its answer, gone with it
+                views.Clear();
                 return fallback();
             }
         }
@@ -351,11 +385,21 @@ namespace Astra.Unity
             ring = null;
             if (compositor != null) compositor.Ring = null;
             compositor?.Reset();
+            shadow?.Reset(0);
             light.Reset();
+            views.Count = 0;
             try
             {
                 ring = FrameRing.Open(link.Hello.Shm, settings.RingPath.Value);
                 if (compositor != null) compositor.Ring = ring;
+                // Only frames this session publishes; the ones still in the ring are the last engine's.
+                compositor?.Reset(ring.Counter);
+                shadow?.Reset(ring.Counter);
+                // Views besides the main one: as many as the engine draws and its ring holds (none for an
+                // engine from before views, which would take every camera for the main one).
+                // Half the slots at most: a wake writes one frame per view, and the next wake must not
+                // come round to a slot the game is still copying the last one's from.
+                views.Count = Math.Min(link.Hello.Views, ring.Slots / 2) - 1;
                 log.LogInfo($"frames from {ring.Source} ({ring.MaxWidth}x{ring.MaxHeight})");
             }
             catch (System.IO.IOException e)
@@ -365,8 +409,55 @@ namespace Astra.Unity
             }
         }
 
+        /// <summary>Cameras the integration asked her into (besides the main one), checked once each;
+        /// the yes ones get a VIEW of their own while one is free — the engine draws her for each.</summary>
+        readonly Dictionary<int, bool> extraCameras = new Dictionary<int, bool>();
+        readonly ViewTable views = new ViewTable();
+
+        /// <summary>The view <paramref name="cam"/> is: 0 for the main camera (and an extra camera that
+        /// found no view free, which then gets the main picture reprojected).</summary>
+        int ViewOf(Camera cam) => cam == main ? 0 : views.Of(cam);
+        readonly HashSet<int> extraInGraph = new HashSet<int>();
+
+        /// <summary>Is <paramref name="cam"/> one the integration wants her in too? (Its answer is kept
+        /// per camera; its depth texture is switched on once.)</summary>
+        bool IsExtra(Camera cam)
+        {
+            var pick = integration?.ExtraCamera;
+            if (pick == null || cam == null) return false;
+            int id = cam.GetInstanceID();
+            if (!extraCameras.TryGetValue(id, out bool yes))
+            {
+                yes = Guarded("extra camera", () => pick(cam), () => false);
+                extraCameras[id] = yes;
+                if (yes)
+                {
+                    Compat.RequestDepthTexture(cam);
+                    log.LogInfo($"also drawing her into the camera '{cam.name}'");
+                }
+            }
+            return yes;
+        }
+
         void OnBeginCamera(Camera cam)
         {
+            // Only where she can be drawn INTO another camera (URP — Built-in and HDRP composite into
+            // the main one only) and while she is shown: else a view would be drawn for nobody.
+            if (!faulted && cam != main && compositor != null && srp && !hdrp && compositor.Show && her.Placed && link != null && link.Ready && IsExtra(cam))
+            {
+                // Another camera of the game (a video camera, a mirror): its own view — the engine draws
+                // her for it (an engine without views leaves it the main picture, reprojected).
+                int view = views.Assign(cam, out int taken);
+                if (taken != 0)
+                {
+                    compositor.ForgetView(taken);
+                    log.LogInfo($"the camera '{cam.name}' is her view {taken}");
+                }
+                if (view != 0) Fenced("send", () => Send(shots.Message(cam, settings.MaxPictureHeight.Value, view)));
+                if (srp && !hdrp && UrpHook.Enqueue(cam, compositor)) extraInGraph.Add(cam.GetInstanceID());
+                else extraInGraph.Remove(cam.GetInstanceID());
+                return;
+            }
             if (faulted || cam != main || link == null || !link.Ready) return;
             Fenced("send", () =>
             {
@@ -377,7 +468,9 @@ namespace Astra.Unity
                     // (the scene's sun takes over), never the foundation.
                     var choose = integration?.Sun;
                     Light sun = choose != null ? Guarded("sun", () => choose(), () => null) : null;
-                    Send(light.Message(her.Position + Vector3.up * 1.2f * scale, mask, ignore, choose != null && integration != null, sun));
+                    light.Physical = hdrp;
+                    if (hdrp) light.Exposure = HdrpHook.Exposure(cam);
+                    Send(light.Message(her.Position, HerHeight * scale, ignore, choose != null && integration != null, sun));
                 }
                 SendCues(frame.Cues);
                 if (integration != null) SendCues(integration.Cues);
@@ -396,10 +489,14 @@ namespace Astra.Unity
                 Send(shots.Message(cam, settings.MaxPictureHeight.Value)); // LAST: it commits the frame
                 lastSent = Time.unscaledTime;
             });
+            // Her shadow, before this camera draws its shadow maps: the game's own lights cast it.
+            Fenced("shadow", () => shadow?.Update(ring, cam, compositor != null && compositor.Show && settings.Shadows.Value));
             if (compositor == null || faulted) return;
             // URP 17: her pass goes INTO this camera's render graph (the only place its depth exists).
-            inGraph = srp && UrpHook.Enqueue(cam, compositor);
-            if (srp && !inGraph && UrpHook.Missing != null) Once("urp-fallback", $"compositing after the camera: {UrpHook.Missing}");
+            // HDRP: her custom pass rides on this camera (attached once per main camera).
+            inGraph = srp && (hdrp ? HdrpHook.Ensure(cam, compositor) : UrpHook.Enqueue(cam, compositor));
+            string missing = hdrp ? HdrpHook.Missing : UrpHook.Missing;
+            if (srp && !inGraph && missing != null) Once("adapter-fallback", $"compositing after the camera: {missing}");
         }
 
         /// <summary>Send a built message; a builder that refused its input (null) is said once per reason.</summary>
@@ -417,30 +514,42 @@ namespace Astra.Unity
 
         void OnEndCamera(Camera cam)
         {
+            if (!faulted && cam != main && compositor != null && !hdrp && !extraInGraph.Contains(cam.GetInstanceID()) && IsExtraKnown(cam))
+            {
+                // Right after the camera, against its own depth texture (no stack to blit over her).
+                DrawAfterCamera(cam);
+                return;
+            }
             if (faulted || cam != main || compositor == null || inGraph) return;
             // Where the SRP reports the end of the whole context, draw THERE: a camera stack's final
             // blit (the last overlay camera's) would otherwise copy over her.
             if (contextEnd)
             {
+                // …but test against THIS camera's depth: by then another camera's may be bound.
+                Fenced("draw", () => compositor.KeepDepth());
                 mainRendered = true;
                 return;
             }
             DrawAfterCamera(cam);
         }
 
+        bool IsExtraKnown(Camera cam) =>
+            integration?.ExtraCamera != null && her.Placed && link != null && link.Ready
+            && extraCameras.TryGetValue(cam.GetInstanceID(), out bool yes) && yes;
+
         void OnEndContext()
         {
             if (!mainRendered) return;
             mainRendered = false;
             if (faulted || main == null || compositor == null || inGraph) return;
-            DrawAfterCamera(main);
+            DrawAfterCamera(main, keptDepth: true);
         }
 
-        void DrawAfterCamera(Camera cam)
+        void DrawAfterCamera(Camera cam, bool keptDepth = false)
         {
             Fenced("draw", () =>
             {
-                compositor.DrawNow(cam);
+                compositor.DrawNow(cam, keptDepth);
                 Once("depth", !compositor.DepthTest ? "no depth test in this pipeline: she is drawn over everything"
                     : Shader.GetGlobalTexture(Shader.PropertyToID("_CameraDepthTexture")) != null
                         ? "the game's depth texture is bound after the camera: walls hide her"
@@ -477,6 +586,9 @@ namespace Astra.Unity
                 try { compositor?.Dispose(); }
                 catch (Exception) { /* already broken */ }
                 compositor = null;
+                try { shadow?.Dispose(); }
+                catch (Exception) { /* already broken */ }
+                shadow = null;
             }
         }
 
@@ -500,6 +612,7 @@ namespace Astra.Unity
             link?.Dispose();
             ring?.Dispose();
             compositor?.Dispose();
+            shadow?.Dispose();
         }
     }
 }

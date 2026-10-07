@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Her composite pass for HDRP (a custom pass with the camera's depth buffer). Compiled against
+       HDRP, which ships with no NuGet package: HdrpRefDir points at an HDRP game's Managed folder or
+       an HDRP Unity project's Library/ScriptAssemblies. Built against Unity 2022.3's API (HDRP 14);
+       CustomPass.Execute(CustomPassContext) is the same from HDRP 10 on. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>Astra.Hdrp</AssemblyName>
+    <RootNamespace>Astra.Unity</RootNamespace>
+    <HdrpRefDir Condition="'$(HdrpRefDir)' == ''">$(MSBuildThisFileDirectory)../../unity/AstraTestbedHdrp/Library/ScriptAssemblies</HdrpRefDir>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="UnityEngine.Modules" Version="2022.3.62" IncludeAssets="compile" PrivateAssets="all" />
+    <Reference Include="$(HdrpRefDir)/Unity.RenderPipelines.HighDefinition.Runtime.dll" Private="false" />
+    <Reference Include="$(HdrpRefDir)/Unity.RenderPipelines.Core.Runtime.dll" Private="false" />
+    <ProjectReference Include="../Astra.BepInEx5/Astra.BepInEx5.csproj" Private="false" />
+  </ItemGroup>
+</Project>

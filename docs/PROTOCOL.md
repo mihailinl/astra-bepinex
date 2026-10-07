@@ -16,7 +16,9 @@ face, voice). This page is the contract a mod is written against. The design and
 > **Phase 1 (2026-10-04):** picture, camera, placement, frame ring. **Phase 2a:** animation by name
 > (`play` / `trigger` / `resume`), the placement `anchor`, and a CHAIR state (`seat`) for vehicles.
 > **Phase 3:** animator PARAMETERS — send her `speed` and `airborne` and she walks, jogs, sprints
-> and jumps, at a pace matched to yours. Mood, look-at and events back follow.
+> and jumps, at a pace matched to yours. **Views (2026-10-06):** film her through several cameras
+> at once — a mirror, a handheld camera — each with its own picture of one pose. Mood, look-at and
+> events back follow.
 
 ## Running it
 
@@ -67,15 +69,22 @@ is refused (browsers are not allowed in); native clients do not send one.
 ### Game → engine
 
 ```json
-{"t":"hello","v":1,"client":"my-mod"}
-{"t":"cam","id":1234,"pos":[x,y,z],"fwd":[x,y,z],"up":[x,y,z],"fovY":45.75,"w":1920,"h":1080,"echo":[a,b,c]}
+{"t":"hello","v":1,"client":"my-mod","shadow":"caster"}
+{"t":"cam","id":1234,"pos":[x,y,z],"fwd":[x,y,z],"up":[x,y,z],"fovY":45.75,"w":1920,"h":1080,"echo":[a,b,c],"view":0}
 {"t":"avatar","id":0,"pos":[x,y,z],"fwd":[x,y,z],"up":[x,y,z],"vel":[x,y,z],"anchor":"hips","scale":1.2,"params":{"speed":1.4,"airborne":false}}
 {"t":"param","set":{"speed":0.0}}          // parameters on their own (null = back to the default)
 {"t":"play","state":"seat"}               // enter a state of her animation set by name
 {"t":"trigger","name":"music_mid"}         // raise a token into her graph
 {"t":"resume"}                             // hand her back to the graph's default state
-{"t":"light","sun":{"dir":[x,y,z],"color":[r,g,b],"intensity":1.0,"visible":1.0},"ambient":[r,g,b]}
+{"t":"light","sun":{"dir":[x,y,z],"color":[r,g,b],"intensity":1.0,"visible":1.0},"ambient":[r,g,b],
+ "ambientCube":[r,g,b, r,g,b, r,g,b, r,g,b, r,g,b, r,g,b],
+ "lamps":[{"pos":[x,y,z],"range":8,"color":[r,g,b],"intensity":12.5,"spot":{"dir":[x,y,z],"cos":[0.9,0.97]}}]}
 ```
+
+- **`hello`'s `shadow`** (optional) — which of her two shadows you read, because each costs the engine
+  every frame: `"sun"` (her view from the sun in plane 3, flag 32 — the DS add-on's), `"caster"`
+  (her shadow caster, flag 64 — the Unity foundation's), `"both"` or `"none"`. Absent = `"sun"`, what
+  every client got before the caster existed. Any other word is refused.
 
 - **`cam`** — once per game frame. `pos` is the eye; it looks along `fwd`; `up` fixes the roll.
   `fovY` is the VERTICAL field of view in degrees (1–179); the projection is a plain symmetric
@@ -84,6 +93,24 @@ is refused (browsers are not allowed in); native clients do not send one.
   first 3 kept) is copied into the frame verbatim and never interpreted — put whatever your
   reprojection needs there. **A frame is drawn for each `cam`**; several since the last draw
   collapse into the newest.
+- **`view`** (optional, a whole number 0–7, default 0) — WHICH of your cameras this is, when you
+  film her through more than one (your main camera is view 0; a mirror, a handheld camera, a
+  security monitor are others). Each view keeps its own newest `cam`, and one never supersedes
+  another. After a `cam` the engine draws EVERY view whose newest `cam` it has not drawn yet — all
+  of them with the SAME pose of her (her animation advances once, then each further view is drawn
+  at that same instant), view 0 first and published before the next is drawn. A `view` out of
+  range is refused with an `error`, never treated as 0. What changes per view:
+  - **The picture size is view 0's** (until a view 0 arrives, the first view's): every view is
+    drawn into that one size — a view's own `w`/`h` only give its projection its ASPECT (`w/h`),
+    so its pixels are not square when its aspect differs. Map its picture back with ITS aspect:
+    uv ↔ NDC is linear on both axes, the projection is the plain symmetric perspective at its own
+    `fovY` and `w/h`. Want a sharper mirror? Send view 0 a larger size, not the mirror.
+  - **Her gaze follows view 0** (the player): she does not look into a mirror's lens.
+  - Each view's frame is tagged with its view in the ring (below); send the `avatar` once per game
+    frame, before the first `cam` — it is shared by every view.
+  - **Send a frame's `cam`s together** — back to back, ideally in one write. The engine draws
+    what has arrived when it wakes; a `cam` that lands after it began drawing gets a wake of its
+    own, and her pose there is a few milliseconds later than in the views drawn before it.
 - **`avatar`** — where she stands: `pos` is her FEET, `fwd` her facing, `vel` m/s (optional; her
   hair and clothes react to her measured motion either way). **`up`** (optional) completes the
   basis: with it she takes the full orientation `fwd`/`up` describe — a vehicle's pitch and roll
@@ -133,6 +160,28 @@ is refused (browsers are not allowed in); native clients do not send one.
   Either part may be left out (hers is kept); `{"t":"light"}` with neither hands her back her own
   light. It replaces her key light for the shading AND her self-shadow (hair on her face follows
   your sun). It holds until the next `light` — send it on change or at ~10 Hz.
+  - **`ambientCube`** (optional) — the ambient light BY DIRECTION where she stands: what a surface
+    facing world +X, −X, +Y, −Y, +Z, −Z receives, 18 numbers (six linear RGB, same scale as
+    `ambient`). Read it off your light probes at her chest (Unity: `LightProbes.GetInterpolatedProbe`
+    evaluated in the six directions): a tunnel is dark, a lit floor lights her from below, the wall
+    behind her does not glow. It wins over `ambient`; send `ambient` too (the cube's mean) for an
+    engine from before the cube. While a `light` is held she is lit as a MToon character in your
+    world: the ambient lights her lit albedo (MToon's GI), so with no sun there is no shade band of
+    a sun that is not there; her rim and matcap follow the light, so nothing of her glows in a dark
+    corner. Desktop lighting is untouched.
+  - **`lamps`** (optional, at most 8, strongest first) — the point and spot lights that reach her,
+    none behind a wall (test that yourself). Light at a distance `d` is
+    `color · intensity / d² · clamp(1 − (d/range)⁴, 0, 1)²` — the inverse square that reaches zero
+    at `range`, URP's and HDRP's own law — times a spot's cone: full inside `cos[1]` (the inner
+    half-angle's cosine), none outside `cos[0]` (the outer's), smooth between; `spot.dir` is where it
+    points. `intensity` is on the sun's scale (a lamp whose `intensity/d²` is 1 at her lights her
+    like a sun of 1), 0..10000; `range` metres, > 0. A pipeline with another falloff (Unity's
+    Built-in) sends the intensity that makes this law give, at her chest, what its own gives there.
+    Each lamp lights her through the toon ramp toward its own direction; the side turned from it
+    keeps a fifth of its light in her shade colour (the bounce off your walls), as the side turned
+    from your sun keeps about a third. They cast no shadow on her. An empty or absent `lamps` = none
+    now. Do not send a light your probes already carry (Unity: a Baked one) — it would light her
+    twice.
 - **When your game lets go of her** — it closes, crashes, or sends nothing for 10 s — every
   parameter it set returns to its default, if it cued her graph she returns to its default state,
   and if it lit her she gets her own light back. The next game finds her standing.
@@ -142,11 +191,13 @@ is refused (browsers are not allowed in); native clients do not send one.
 ### Engine → game
 
 ```json
-{"t":"hello","v":1,"engine":"astra-avatar-engine","ver":"0.1.45","shm":"/dev/shm/astra-frame","maxW":1920,"maxH":1080}
+{"t":"hello","v":1,"engine":"astra-avatar-engine","ver":"0.1.45","shm":"/dev/shm/astra-frame","maxW":1920,"maxH":1080,"views":8}
 {"t":"error","msg":"\"fovY\" 0.5 is outside 1..=179 degrees"}
 ```
 
-Map the ring named by `shm` in the hello reply.
+Map the ring named by `shm` in the hello reply. `views` is how many views (`cam.view` 0..views−1)
+the engine draws: an engine from before views sends no `views` and takes EVERY `cam` for the main
+camera, so send a second view only when the reply has `views` > 1.
 
 ## The frame ring (shared memory)
 
@@ -155,7 +206,7 @@ a reader for one reads the other. Little-endian.
 
 ```text
 header (4096 B)   @0  u32 magic 0x5450434D ('M','C','P','T')   @4  u32 version 1
-                  @8  u32 header bytes (4096)                   @12 u32 slots (3)
+                  @8  u32 header bytes (4096)                   @12 u32 slots (6)
                   @16 i64 slot stride                           @24 u32 max w   @28 u32 max h
                   @32 i64 publish counter (bumped LAST)         @40 i32 latest slot (-1 = none)
                   @44 i32 producer pid
@@ -163,7 +214,9 @@ slot i @ 256+128i +0  i64 seq (ODD while being written)         +8  i64 engine f
                   +16 i64 host frame (= your cam.id)            +24 u32 w   +28 u32 h
                   +32 f32 near   +36 f32 far (informational)    +40 f32 vfov (degrees)
                   +44 u32 flags                                 +48/+56/+64 f64 cam pos (verbatim)
-                  +72/+76/+80 f32 echo (verbatim)               +88 i64 capture ns  +96 i64 publish ns
+                  +72/+76/+80 f32 echo (verbatim)               +84 i32 VIEW (your cam.view; 0 before)
+                  +88 i64 capture ns  +96 i64 publish ns        +104 i64 publish number (below)
+                  +112 u32 where her SHADOW CASTER starts, from the slot's data (0 = none)
 data @ 4096 + i·stride, planes tight at the CURRENT w,h:
                   colour  w·h·4  RGBA8, PREMULTIPLIED alpha, display-encoded (sRGB) — what the
                                  desktop window shows; ready for `out = colour + game·(1 − a)`
@@ -175,20 +228,43 @@ sun view (flag 32) +0 u32 'SUNV' (0x564E5553)   +4 u32 N (512)
                   +76..128 zero        then N×N f32 @ +128: metres along dir from the near plane
                   (the plane at centre − dir·near); 0 = not her. Rows top-down, row 0 at +up,
                   columns along +right.
+caster (flag 64)  at slot data + (+112), 16-aligned after the sun view (or after the picture):
+                  +0 u32 'CAST' (0x54534143)   +4 u32 V vertices (≤ 8192)   +8 u32 T triangles
+                  +12 zero   +16 u64 topology id   +24/+32/+40 f64 origin (world, glTF)  +48..64 zero
+                  then V × f32[3] positions @ +64: game metres from the origin, world axes
+                  then V × f32[3] unit normals, world axes
+                  then T × u16[3] triangles, counter-clockwise seen from the outside (glTF)
 ```
 
 - **Flags** the engine writes: `8` (depth is linear metres) | `16` (plane 3 unused) or `32`
-  (plane 3 holds her sun view). Rows are
+  (plane 3 holds her sun view) | `64` (the slot carries her shadow caster). Rows are
   **top-down** (flag `2` — bottom-up — is never set). Readers of the Minecraft format should honour
   all flags: `1` = depth NDC `[0,1]`, `2` = bottom-up rows, `4` = reversed Z.
 - **Reading** (a seqlock): read the counter @32; unchanged → no new frame. `slot` = @40. Read `seq`;
   odd → try later. Copy the planes and the descriptor. Read `seq` again; changed → discard.
+- **Reading one VIEW** (only when you send `view`s): the latest slot @40 is the newest frame of ANY
+  view — after view 0's frame the engine publishes the mirror's, so @40 usually points at the
+  mirror. To read view `k`, scan all `slots` descriptors and take the slot whose `view` (+84) is `k`
+  with the LARGEST publish number (+104 — the counter value that frame was announced with; it keeps
+  counting across engine restarts and game switches, unlike the engine frame at +8; 0 = a slot never
+  written), then read it with the same seqlock. Match its `host frame` to a `cam.id` you sent for
+  that view — a slot of a view you stopped sending is old. The six slots keep the newest frame of
+  each of up to six views that send every game frame; with seven or eight such views an older
+  view's frame may already be overwritten when you look (keep it to six, or read right after you
+  send). A game that never sends `view` sees exactly the old ring: only slots 0–2 are used and +84
+  is always 0, so a reader of the latest slot is unaffected.
 - **Depth** is the NEAREST of the MSAA samples, never an average, so her silhouette does not halo
   in front of walls. Where alpha is 0 the depth means nothing (it is 0).
 - A frame with nothing to show (no body loaded yet) is published as all zeros: **clear** her, do
   not keep the last picture.
 - The ring is created once, sized for `max`, and **never shrunk or removed** — map it once and keep
-  the mapping.
+  the mapping. Size the mapping from the header (`4096 + slots · stride`), never from a constant: a
+  ring made by an engine before views had 3 slots, one made since has 6. (On Windows a game still
+  holding an older 3-slot ring when the engine restarts keeps it: the engine then publishes every
+  view through those 3.)
+- **The caster rides with the PRIMARY view's frames only** (view 0 once one arrived): every view of a
+  wake is drawn at one pose, so it is written once — read it from view 0's newest frame. It is
+  written only when your `hello` asked for it (`"shadow":"caster"` or `"both"`).
 - `host frame` + `cam pos` + `echo` say exactly which of your cameras the picture was rendered
   from: reproject it to your current camera to hide the one-frame latency.
 
@@ -218,6 +294,20 @@ sun view (flag 32) +0 u32 'SUNV' (0x564E5553)   +4 u32 N (512)
   `u = (P − centre)·right / half`, `v = (P − centre)·up / half`, `t = (P − centre)·dir + near`; it is
   in her shadow where the texel at `(u, v)` is non-zero and less than `t` (minus a bias). The basis
   is the one that frame was rendered with.
+- **Better: let your own renderer cast her shadow.** Every frame with a picture of her also carries
+  her SHADOW CASTER (flag 64): a coarse copy of her body (a few thousand triangles, built from her
+  own mesh by vertex clustering, ~2 cm) in exactly the pose of that frame's picture, placed in your
+  world. Put it in your scene as an object that casts shadows and is never drawn (Unity:
+  `ShadowCastingMode.ShadowsOnly`), and she is shadowed by EVERY light you have — your sun, a
+  flashlight, a lamp — with your shadow filtering, cascades and post-processing, in every camera
+  and mirror of yours. Positions are relative to `origin` (`f64`, so a world kilometres wide costs
+  no precision) and in your world's axes after the usual z flip of a left-handed engine — which
+  also reverses the winding: flip each triangle, or draw both sides (her hair and skirt are single
+  sheets; drawing both sides is the safer choice for a shadow). Upload the triangles only when
+  `topology` changes (another character, another body); it is the same for the same triangles in
+  any engine process, so keeping it across an engine restart is right. A frame without a caster
+  (no body, a 2D character, a ring configured too small to hold it) has no flag 64 and `+112` = 0:
+  hide your copy then. Expressions are not in it, nor are her accessories yet.
 
 ## Security
 

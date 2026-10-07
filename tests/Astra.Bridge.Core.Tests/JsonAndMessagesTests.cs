@@ -49,6 +49,17 @@ public class JsonAndMessagesTests
     }
 
     [Fact]
+    public void a_view_is_written_only_when_not_the_main_one_and_refused_out_of_range()
+    {
+        var fwd = new Vec3(0, 0, -1);
+        var up = new Vec3(0, 1, 0);
+        Assert.DoesNotContain("view", Messages.Cam(1, Vec3.Zero, fwd, up, 60, 10, 10));
+        Assert.EndsWith(",\"view\":3}", Messages.Cam(1, Vec3.Zero, fwd, up, 60, 10, 10, null, 3));
+        Assert.Null(Messages.Cam(1, Vec3.Zero, fwd, up, 60, 10, 10, null, 8));
+        Assert.Null(Messages.Cam(1, Vec3.Zero, fwd, up, 60, 10, 10, null, -1));
+    }
+
+    [Fact]
     public void the_echo_keeps_at_most_three_numbers()
     {
         var json = Messages.Cam(1, Vec3.Zero, new Vec3(0, 0, -1), new Vec3(0, 1, 0), 60, 10, 10, new double[] { 1, 2, 3, 4 });
@@ -93,12 +104,41 @@ public class JsonAndMessagesTests
         Assert.Equal("{\"t\":\"light\"}", Messages.Light(null, null));
     }
 
+    /// <summary>The ambient by direction and the lamps travel whole and bounded; the 0.2 overload
+    /// still writes what it wrote.</summary>
+    [Fact]
+    public void light_carries_an_ambient_cube_and_lamps()
+    {
+        var cube = new[] { new Vec3(0, 0, 0), new Vec3(0.1, 0, 0), new Vec3(0.2, 0, 0), new Vec3(0.3, 0, 0), new Vec3(0.4, 0, 0), new Vec3(20, 0, 0) };
+        var lamps = new[]
+        {
+            new Lamp { Pos = new Vec3(1, 2, 3), Range = 8, Color = new Vec3(1, 0.8, 0.5), Intensity = 12.5 },
+            new Lamp { Pos = new Vec3(0, 1.6, -2), Range = 15, Color = new Vec3(1, 1, 1), Intensity = 3e5, Spot = true, Aim = new Vec3(0, 0, 1), CosOuter = 0.9, CosInner = 0.5 },
+        };
+        Assert.Equal(
+            "{\"t\":\"light\",\"ambientCube\":[0,0,0,0.1,0,0,0.2,0,0,0.3,0,0,0.4,0,0,16,0,0]," +
+            "\"lamps\":[{\"pos\":[1,2,3],\"range\":8,\"color\":[1,0.8,0.5],\"intensity\":12.5}," +
+            "{\"pos\":[0,1.6,-2],\"range\":15,\"color\":[1,1,1],\"intensity\":10000,\"spot\":{\"dir\":[0,0,1],\"cos\":[0.9,0.9]}}]}",
+            Messages.Light(null, null, cube, lamps));
+        Assert.Equal("{\"t\":\"light\",\"ambient\":[0.1,0.1,0.1]}", Messages.Light(null, new Vec3(0.1, 0.1, 0.1)));
+        Assert.Null(Messages.Light(null, null, new Vec3[3], null));
+        Assert.Null(Messages.Light(null, null, null, new Lamp[9]));
+        Assert.Null(Messages.Light(null, null, null, new[] { new Lamp { Pos = new Vec3(double.NaN, 0, 0), Range = 1, Color = new Vec3(1, 1, 1) } }));
+    }
+
+    [Fact]
+    public void the_hello_says_which_shadow_it_reads_only_when_told()
+    {
+        Assert.Equal("{\"t\":\"hello\",\"v\":1,\"client\":\"g\"}", Messages.Hello("g", null));
+        Assert.Equal("{\"t\":\"hello\",\"v\":1,\"client\":\"g\",\"shadow\":\"caster\"}", Messages.Hello("g", null, "caster"));
+    }
+
     [Fact]
     public void the_hello_reply_is_read_and_nested_values_are_skipped()
     {
         var m = JsonReader.ReadObject(
             "{\"t\":\"hello\",\"v\":1,\"engine\":\"astra-avatar-engine\",\"extra\":{\"a\":[1,{\"b\":null}],\"c\":\"}\"}," +
-            "\"ver\":\"0.1.45\",\"shm\":\"/dev/shm/astra-frame\",\"maxW\":1920,\"maxH\":1080}");
+            "\"ver\":\"0.1.45\",\"shm\":\"/dev/shm/astra-frame\",\"maxW\":1920,\"maxH\":1080,\"views\":8}");
         var h = HelloReply.From(m);
         Assert.NotNull(h);
         Assert.Equal(1, h.Version);
@@ -106,6 +146,8 @@ public class JsonAndMessagesTests
         Assert.Equal("/dev/shm/astra-frame", h.Shm);
         Assert.Equal(1920, h.MaxWidth);
         Assert.Equal(1080, h.MaxHeight);
+        Assert.Equal(8, h.Views);
+        Assert.Equal(0, HelloReply.From(JsonReader.ReadObject("{\"t\":\"hello\",\"v\":1}")).Views); // an engine from before views
         Assert.False(m.ContainsKey("extra"));
         Assert.Null(HelloReply.From(JsonReader.ReadObject("{\"t\":\"error\",\"msg\":\"no\"}")));
     }

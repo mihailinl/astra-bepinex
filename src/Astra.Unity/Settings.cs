@@ -30,6 +30,7 @@ namespace Astra.Unity
         public ConfigEntry<string> ColourSpace;
         public ConfigEntry<int> MaxPictureHeight;
         public ConfigEntry<bool> SendLight;
+        public ConfigEntry<bool> Shadows;
 
         /// <summary>The player's value if they changed it from the foundation's default, else the
         /// integration's default when it set one, else the foundation's.</summary>
@@ -67,6 +68,8 @@ namespace Astra.Unity
                     "auto / linear / gamma: how her colours are written into the game's picture. Try the other if she looks too dark or washed out."),
                 MaxPictureHeight = c.Bind("Picture", "MaxPictureHeight", 1080, "Her picture's height at most (the game's aspect is kept). Lower = cheaper."),
                 SendLight = c.Bind("Picture", "SendLight", true, "Light her with this game's sun and sky."),
+                Shadows = c.Bind("Picture", "Shadows", true,
+                    "Let this game's own lights cast her shadow (a copy of her body that only casts shadows, never drawn)."),
             };
         }
     }

@@ -56,6 +56,10 @@ namespace Astra.Bridge
         /// <summary>The current session's hello reply (null before the first).</summary>
         public HelloReply Hello => hello;
 
+        /// <summary>Which of her shadows this game reads, said in every hello (<see cref="Messages.Hello(string, string, string)"/>);
+        /// null = not said. Set it before <see cref="Start"/>.</summary>
+        public string Shadow { get; set; }
+
         /// <summary>Bumped on every engine hello: a new session — map the ring again.</summary>
         public int Session => Volatile.Read(ref session);
 
@@ -93,7 +97,7 @@ namespace Astra.Bridge
                 {
                     socket = WebSocketClient.Connect(host, port, "/", 2000);
                     ws = socket;
-                    if (!socket.SendText(Messages.Hello(client, token))) throw new IOException("closed before hello");
+                    if (!socket.SendText(Messages.Hello(client, token, Shadow))) throw new IOException("closed before hello");
                     State($"connected to Astra on {host}:{port}");
                     while (true)
                     {

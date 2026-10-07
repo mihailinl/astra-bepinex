@@ -1,0 +1,7 @@
+{
+  "name": "com.astra.testbed",
+  "version": "1.0.0",
+  "displayName": "Astra testbed",
+  "description": "The tiny game the Astra foundation is tested on, built in code: shared by the URP and HDRP testbed projects.",
+  "unity": "2022.3"
+}

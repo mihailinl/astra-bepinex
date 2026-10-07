@@ -151,6 +151,93 @@ namespace Astra.Unity
             return list;
         }
 
+        /// <summary>
+        /// The vertex arrays her shadow caster fills every frame and hands to its mesh: plain arrays
+        /// under Mono; under IL2CPP the il2cpp arrays themselves, made once per size, so a frame
+        /// allocates nothing (a managed array would be copied into a new il2cpp one at every hand-over).
+        /// Fill them by FIELD (<c>v.x = …</c>): under IL2CPP a <c>Vector3</c> constructor or operator is
+        /// a call into the runtime.
+        /// </summary>
+        public sealed class VertexArrays
+        {
+#if IL2CPP
+            public Il2CppStructArray<Vector3> Positions, Normals;
+#else
+            public Vector3[] Positions, Normals;
+#endif
+            public int Length => Positions == null ? 0 : Positions.Length;
+
+            public void Resize(int n)
+            {
+                if (Length == n) return;
+#if IL2CPP
+                Positions = new Il2CppStructArray<Vector3>(n);
+                Normals = new Il2CppStructArray<Vector3>(n);
+#else
+                Positions = new Vector3[n];
+                Normals = new Vector3[n];
+#endif
+            }
+
+            /// <summary>
+            /// Her caster's <paramref name="v"/> vertices from the ring — glTF's right-handed world to
+            /// Unity's left-handed one (z flips), each one twice (the front copy, then the back one
+            /// with its normal reversed) — and their bounds. Through ONE pointer per array per frame:
+            /// under IL2CPP an indexed element write is several calls into the runtime.
+            /// </summary>
+            public unsafe void Fill(float* p, float* q, int v, out float[] bounds)
+            {
+                float loX = float.MaxValue, loY = float.MaxValue, loZ = float.MaxValue;
+                float hiX = float.MinValue, hiY = float.MinValue, hiZ = float.MinValue;
+#if IL2CPP
+                fixed (Vector3* pos = Positions.AsSpan(), nrm = Normals.AsSpan())
+#else
+                fixed (Vector3* pos = Positions, nrm = Normals)
+#endif
+                {
+                    for (int i = 0; i < v; i++)
+                    {
+                        float x = p[3 * i], y = p[3 * i + 1], z = -p[3 * i + 2];
+                        float nx = q[3 * i], ny = q[3 * i + 1], nz = -q[3 * i + 2];
+                        pos[i].x = x; pos[i].y = y; pos[i].z = z;
+                        pos[i + v].x = x; pos[i + v].y = y; pos[i + v].z = z;
+                        nrm[i].x = nx; nrm[i].y = ny; nrm[i].z = nz;
+                        nrm[i + v].x = -nx; nrm[i + v].y = -ny; nrm[i + v].z = -nz;
+                        if (x < loX) loX = x;
+                        if (y < loY) loY = y;
+                        if (z < loZ) loZ = z;
+                        if (x > hiX) hiX = x;
+                        if (y > hiY) hiY = y;
+                        if (z > hiZ) hiZ = z;
+                    }
+                }
+                bounds = new[] { loX, loY, loZ, hiX, hiY, hiZ };
+            }
+
+            /// <summary>Into <paramref name="mesh"/>, with its triangles when they changed (null = the same).</summary>
+            public void Upload(Mesh mesh, int[] triangles)
+            {
+                if (triangles != null) mesh.Clear();
+                mesh.vertices = Positions;
+                mesh.normals = Normals;
+                if (triangles != null) mesh.triangles = triangles;
+            }
+        }
+
+        /// <summary>Ask URP to render this camera's depth texture (her depth test needs it). Through
+        /// reflection: the plugin does not depend on URP. Harmless where there is no URP.</summary>
+        public static void RequestDepthTexture(Camera cam)
+        {
+#if !IL2CPP
+            foreach (var c in cam.GetComponents<Component>())
+            {
+                if (c == null || c.GetType().Name != "UniversalAdditionalCameraData") continue;
+                var p = c.GetType().GetProperty("requiresDepthTexture");
+                if (p != null && p.CanWrite) p.SetValue(c, true, null);
+            }
+#endif
+        }
+
         public static List<GameObject> WithTag(string tag)
         {
             var list = new List<GameObject>();
@@ -219,22 +306,55 @@ namespace Astra.Unity
             return found;
         }
 
-        /// <summary>The ambient light around a point, from the scene's spherical-harmonics probe:
-        /// the average of straight up and the horizon.</summary>
-        public static Color Ambient()
+        /// <summary>A light probe's light on a surface facing each of <paramref name="directions"/>
+        /// (what the game's own shaders get from it).</summary>
+        public static Color[] EvaluateSh(SphericalHarmonicsL2 sh, Vector3[] directions)
         {
-            var sh = RenderSettings.ambientProbe;
 #if IL2CPP
-            var dirs = new Il2CppStructArray<Vector3>(2);
-            var cols = new Il2CppStructArray<Color>(2);
-#else
-            var dirs = new Vector3[2];
-            var cols = new Color[2];
-#endif
-            dirs[0] = Vector3.up;
-            dirs[1] = Vector3.forward;
+            var dirs = new Il2CppStructArray<Vector3>(directions.Length);
+            var cols = new Il2CppStructArray<Color>(directions.Length);
+            for (int i = 0; i < directions.Length; i++) dirs[i] = directions[i];
             sh.Evaluate(dirs, cols);
-            return (cols[0] + cols[1]) * 0.5f;
+            var result = new Color[directions.Length];
+            for (int i = 0; i < result.Length; i++) result[i] = cols[i];
+            return result;
+#else
+            var cols = new Color[directions.Length];
+            sh.Evaluate(directions, cols);
+            return cols;
+#endif
+        }
+
+        /// <summary>The active render pipeline asset's class, by its NATIVE type: under IL2CPP a wrapper's
+        /// C# type is the property's declared one (<c>RenderPipelineAsset</c>), never HDRP's or URP's.
+        /// Null in the Built-in pipeline.</summary>
+        public static string PipelineClass()
+        {
+            var asset = GraphicsSettings.currentRenderPipeline;
+            if (asset == null) return null;
+#if IL2CPP
+            return asset.GetIl2CppType().FullName;
+#else
+            return asset.GetType().FullName;
+#endif
+        }
+
+        /// <summary><paramref name="t"/> as a render texture, or null (an IL2CPP wrapper is never a
+        /// C# <c>RenderTexture</c> by a type test).</summary>
+        public static RenderTexture AsRenderTexture(Texture t)
+        {
+#if IL2CPP
+            return t?.TryCast<RenderTexture>();
+#else
+            return t as RenderTexture;
+#endif
+        }
+
+        /// <summary>Let go of every texture <paramref name="m"/> holds (a copy of a game's material that
+        /// samples none of them, so a scene's unload is not held up by it).</summary>
+        public static void ClearTextures(Material m)
+        {
+            foreach (int id in m.GetTexturePropertyNameIDs()) m.SetTexture(id, null);
         }
     }
 }

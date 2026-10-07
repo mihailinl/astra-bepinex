@@ -84,6 +84,8 @@ namespace Astra.Sdk
     public sealed class GameIntegration
     {
         internal Func<Camera, PlayerInfo?> PlayerLocator;
+        internal Func<Camera> CameraLocator;
+        internal Func<Camera, bool> ExtraCamera;
         internal IBrain Brain;
         internal Func<Light> Sun;
         internal readonly List<Action<FrameContext>> FrameHandlers = new List<Action<FrameContext>>();
@@ -112,6 +114,32 @@ namespace Astra.Sdk
         public GameIntegration UsePlayer(Func<Camera, PlayerInfo?> locate)
         {
             PlayerLocator = locate;
+            return this;
+        }
+
+        /// <summary>
+        /// The camera she is composited into — the one the player looks through. Called every frame;
+        /// return null for "none now" (she is not drawn). The default: <c>Camera.main</c> (the
+        /// camera tagged MainCamera), which many games do not tag, or switch away from (a spectator
+        /// camera, a vehicle camera).
+        /// </summary>
+        public GameIntegration UseCamera(Func<Camera> camera)
+        {
+            CameraLocator = camera;
+            return this;
+        }
+
+        /// <summary>
+        /// Draw her into OTHER cameras of the game too — an in-game video camera, a mirror, a security
+        /// monitor: <paramref name="pick"/> is asked for each camera that renders (keep it cheap) and
+        /// says whether she belongs in it. She is the main camera's picture reprojected into that
+        /// camera's view and tested against ITS depth, so a camera looking roughly where the player
+        /// looks shows her right; one pointed far away shows her only where the main picture covers.
+        /// (URP; the Built-in pipeline and HDRP draw her into the main camera only, for now.)
+        /// </summary>
+        public GameIntegration AlsoDrawInto(Func<Camera, bool> pick)
+        {
+            ExtraCamera = pick;
             return this;
         }
 
@@ -296,6 +324,9 @@ namespace Astra.Sdk
         public float? MaxSpeed;
         /// <summary>Comma-separated layer names she walks on and bumps into.</summary>
         public string GroundLayers;
+        /// <summary>The same as a layer MASK, for a game that keeps its own (wins over
+        /// <see cref="GroundLayers"/>; the player's GroundLayers in the config wins over both).</summary>
+        public int? GroundMask;
         public float? DepthBias;
         public float? DepthSoftness;
     }

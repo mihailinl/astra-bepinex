@@ -1,5 +1,11 @@
 {
   "dependencies": {
+    "com.astra.testbed": {
+      "version": "file:../../com.astra.testbed",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
     "com.unity.burst": {
       "version": "1.8.29",
       "depth": 2,

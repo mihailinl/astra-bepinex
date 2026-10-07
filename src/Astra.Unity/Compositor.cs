@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using Astra.Bridge;
@@ -22,13 +23,31 @@ namespace Astra.Unity
         readonly Material mat;
         readonly AssetBundle bundle;
         readonly CommandBuffer cmd = new CommandBuffer { name = "Astra" };
-        Texture2D colour, depth;
-        RingFrame shown;
-        bool haveFrame;
+        // Every draw's values go in a property block the command COPIES when recorded: a material's
+        // own values are read when the command EXECUTES, and two cameras drawn in one frame (the main
+        // one, a video camera) would both get the last camera's.
+        readonly MaterialPropertyBlock block = new MaterialPropertyBlock();
+        // Her picture per VIEW (0 = the main camera; others an in-game camera, a mirror).
+        readonly Dictionary<int, View> views = new Dictionary<int, View>();
         Camera attached; // the Built-in camera our command buffer is on
-        long seen;
+        // Frames numbered up to this belong to an earlier session (see Reset).
+        long floor;
+        // The main camera's depth, kept at its end for a draw at the end of the whole context (KeepDepth).
+        RenderTexture keptDepth;
+        bool haveKeptDepth;
+        bool disposed;
         CameraFeed shots;
         Settings settings;
+        Func<Camera, int> viewOf = _ => 0;
+
+        /// <summary>One view's picture: two textures, the frame they hold, the newest frame seen.</summary>
+        sealed class View
+        {
+            public Texture2D Colour, Depth;
+            public RingFrame Shown;
+            public bool Have;
+            public long Seen;
+        }
 
         /// <summary>The ring frames come from (null between sessions).</summary>
         public FrameRing Ring { get; set; }
@@ -43,19 +62,37 @@ namespace Astra.Unity
         /// <summary>The material her pass draws with (for a pass a pipeline adapter records).</summary>
         public Material Material => mat;
 
+        /// <summary>The shader pass that tests her against the camera's depth BUFFER bound with the
+        /// target (she writes SV_Depth): for an adapter whose pipeline's depth texture this shader
+        /// cannot read (HDRP). Pass 0 tests against the depth texture.</summary>
+        public const int DepthBufferPass = 1;
+
         static readonly int IdColour = Shader.PropertyToID("_AstraColour");
         static readonly int IdDepth = Shader.PropertyToID("_AstraDepth");
         static readonly int IdSize = Shader.PropertyToID("_AstraSize");
-        static readonly int IdTanNow = Shader.PropertyToID("_AstraTanNow");
+        static readonly int IdProjNow = Shader.PropertyToID("_AstraProjNow");
+        static readonly int IdGpuProj = Shader.PropertyToID("_AstraGpuProj");
+        static readonly int IdInvGpuProj = Shader.PropertyToID("_AstraInvGpuProj");
+        static readonly int IdZNdc = Shader.PropertyToID("_AstraZNdc");
         static readonly int IdTanThen = Shader.PropertyToID("_AstraTanThen");
         static readonly int IdRot0 = Shader.PropertyToID("_AstraRot0");
         static readonly int IdRot1 = Shader.PropertyToID("_AstraRot1");
         static readonly int IdRot2 = Shader.PropertyToID("_AstraRot2");
         static readonly int IdEyeThen = Shader.PropertyToID("_AstraEyeThen");
-        static readonly int IdZParams = Shader.PropertyToID("_AstraZParams");
         static readonly int IdTest = Shader.PropertyToID("_AstraTest");
         static readonly int IdOut = Shader.PropertyToID("_AstraOut");
         static readonly int IdGameDepth = Shader.PropertyToID("_CameraDepthTexture");
+
+        /// <summary>Diagnostics: told (once per kind) why there is nothing to draw.</summary>
+        internal Action<string> Note;
+        string lastNote;
+
+        void Say(string why)
+        {
+            if (why == lastNote) return;
+            lastNote = why;
+            Note?.Invoke(why);
+        }
 
         /// <summary>Why the compositor could not be made (null when it was).</summary>
         public static string Failure { get; private set; }
@@ -66,11 +103,13 @@ namespace Astra.Unity
             this.bundle = bundle;
         }
 
-        /// <summary>What every draw reads: the cameras sent (to reproject from) and the settings.</summary>
-        internal void Bind(CameraFeed shots, Settings settings)
+        /// <summary>What every draw reads: the cameras sent (to reproject from), the settings, and which
+        /// view a camera is.</summary>
+        internal void Bind(CameraFeed shots, Settings settings, Func<Camera, int> viewOf)
         {
             this.shots = shots;
             this.settings = settings;
+            this.viewOf = viewOf;
         }
 
         /// <summary>Load the shader bundle built for this game's Unity line and platform.</summary>
@@ -81,30 +120,38 @@ namespace Astra.Unity
                 : Application.platform == RuntimePlatform.LinuxPlayer ? "linux" : null;
             if (platform == null) return Fail($"no shaders for {Application.platform} yet");
             int major = Major(Application.unityVersion);
-            // The newest bundle not newer than the game's Unity: a bundle loads in its own line and later ones.
+            // Every bundle not newer than the game's Unity line, newest first: a bundle loads in its
+            // own line and later ones — but within a line, a NEWER minor's bundle may be refused by
+            // an older player (6000.3's in a 6000.0 game), so on a refusal the next older one is tried.
             var asm = Assembly.GetExecutingAssembly();
-            string best = null;
-            int bestMajor = 0;
+            var candidates = new System.Collections.Generic.List<KeyValuePair<int, string>>();
             foreach (var res in asm.GetManifestResourceNames())
             {
                 if (!res.StartsWith("astra-", StringComparison.Ordinal) || !res.EndsWith("-" + platform + ".bundle", StringComparison.Ordinal)) continue;
                 int m = Major(res.Substring(6));
-                if (m <= major && m > bestMajor) { best = res; bestMajor = m; }
+                if (m <= major) candidates.Add(new KeyValuePair<int, string>(m, res));
             }
-            if (best == null) return Fail($"no shader bundle for Unity {Application.unityVersion} on {platform}");
-            byte[] bytes;
-            using (var s = asm.GetManifestResourceStream(best))
-            using (var m = new MemoryStream())
+            if (candidates.Count == 0) return Fail($"no shader bundle for Unity {Application.unityVersion} on {platform}");
+            candidates.Sort((a, b) => b.Key.CompareTo(a.Key));
+            Shader shader = null;
+            AssetBundle bundle = null;
+            var refusals = new System.Collections.Generic.List<string>();
+            foreach (var candidate in candidates)
             {
-                s.CopyTo(m);
-                bytes = m.ToArray();
-            }
-            var shader = Compat.LoadShader(bytes, ShaderName, out var bundle, out string why);
-            if (shader == null)
-            {
+                byte[] bytes;
+                using (var s = asm.GetManifestResourceStream(candidate.Value))
+                using (var m = new MemoryStream())
+                {
+                    s.CopyTo(m);
+                    bytes = m.ToArray();
+                }
+                shader = Compat.LoadShader(bytes, ShaderName, out bundle, out string why);
+                if (shader != null) break;
                 if (bundle != null) bundle.Unload(true);
-                return Fail($"{best} in Unity {Application.unityVersion}: {why}");
+                bundle = null;
+                refusals.Add($"{candidate.Value}: {why}");
             }
+            if (shader == null) return Fail($"no shader bundle loads in Unity {Application.unityVersion}: {string.Join("; ", refusals)}");
             if (!shader.isSupported) return Fail($"the composite shader is not supported on {SystemInfo.graphicsDeviceType}");
             var mat = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             return new Compositor(mat, bundle);
@@ -127,86 +174,151 @@ namespace Astra.Unity
             return n;
         }
 
-        /// <summary>A new session: forget the old ring's frames.</summary>
-        public void Reset()
+        /// <summary>A new session: forget the pictures shown, and take only frames published after
+        /// <paramref name="floor"/> (the ring's counter now) — the ring outlives an engine, and the
+        /// newest frames still in it are the previous session's: shown again, she would stand frozen
+        /// where she was until the engine draws her anew.</summary>
+        public void Reset(long floor = 0)
         {
-            haveFrame = false;
-            seen = 0;
+            this.floor = floor;
+            foreach (var v in views.Values)
+            {
+                v.Have = false;
+                v.Seen = floor;
+            }
         }
 
-        /// <summary>Take the newest frame from <paramref name="ring"/>, if there is one, into the textures.</summary>
-        public void Pull(FrameRing ring)
+        /// <summary><paramref name="view"/> was given to another camera: what it showed was another
+        /// camera's.</summary>
+        public void ForgetView(int view)
         {
-            if (ring == null || !ring.TryLatest(ref seen, out var f)) return;
+            if (!views.TryGetValue(view, out var v)) return;
+            v.Have = false;
+            v.Seen = Math.Max(v.Seen, Ring?.Counter ?? floor);
+        }
+
+        /// <summary>Take the newest frame of <paramref name="view"/> from the ring, if there is one, into
+        /// that view's textures.</summary>
+        View Pull(int view)
+        {
+            if (!views.TryGetValue(view, out var v)) views[view] = v = new View { Seen = floor };
+            if (Ring == null || !Ring.TryLatestOf(view, ref v.Seen, out var f)) return v;
             if (f.Width < 1 || f.Height < 1)
             {
-                haveFrame = false;
-                return;
+                v.Have = false;
+                return v;
             }
-            if (colour == null || colour.width != f.Width || colour.height != f.Height)
+            bool fresh = v.Colour == null || v.Colour.width != f.Width || v.Colour.height != f.Height;
+            if (fresh)
             {
-                Release();
-                colour = new Texture2D(f.Width, f.Height, TextureFormat.RGBA32, false, true)
+                Release(v);
+                v.Colour = new Texture2D(f.Width, f.Height, TextureFormat.RGBA32, false, true)
                 {
-                    name = "Astra colour", filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.HideAndDontSave,
+                    name = $"Astra colour {view}", filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.HideAndDontSave,
                 };
-                depth = new Texture2D(f.Width, f.Height, TextureFormat.RFloat, false, true)
+                v.Depth = new Texture2D(f.Width, f.Height, TextureFormat.RFloat, false, true)
                 {
-                    name = "Astra depth", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.HideAndDontSave,
+                    name = $"Astra depth {view}", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.HideAndDontSave,
                 };
             }
-            colour.LoadRawTextureData(f.Colour, f.PlaneBytes);
-            depth.LoadRawTextureData(f.Depth, f.PlaneBytes);
-            if (!ring.StillValid(ref f))
+            v.Colour.LoadRawTextureData(f.Colour, f.PlaneBytes);
+            v.Depth.LoadRawTextureData(f.Depth, f.PlaneBytes);
+            if (!Ring.StillValid(ref f))
             {
-                // The engine reused the slot while we copied: this copy is torn. Show nothing this
-                // frame rather than half of two; the next pull takes a whole one.
-                haveFrame = false;
-                return;
+                // The engine reused the slot while we copied: this copy is torn and is never applied.
+                // The GPU still holds the last whole picture, so it goes on showing — unless the
+                // textures were made anew just now, and hold nothing yet.
+                if (fresh) v.Have = false;
+                return v;
             }
-            colour.Apply(false, false);
-            depth.Apply(false, false);
-            shown = f;
-            haveFrame = true;
+            v.Colour.Apply(false, false);
+            v.Depth.Apply(false, false);
+            v.Shown = f;
+            v.Have = true;
+            return v;
+        }
+
+        /// <summary>The picture to draw into <paramref name="cam"/>: its own view's newest, else the main
+        /// view's reprojected (an engine that draws one view only, or the first frames).</summary>
+        bool Pick(Camera cam, out View v, out Shot then)
+        {
+            int view = viewOf(cam);
+            v = Pull(view);
+            if (v.Have && shots.Find(v.Shown.HostFrame, out then)) return true;
+            if (view != 0)
+            {
+                v = Pull(0);
+                if (v.Have && shots.Find(v.Shown.HostFrame, out then)) return true;
+            }
+            Say(!v.Have ? $"no picture of view {view} yet (newest seen: publish number {v.Seen})"
+                : $"the picture of view {view} was drawn for camera {v.Shown.HostFrame}, which is not among the cameras sent");
+            then = default;
+            return false;
         }
 
         /// <summary>
         /// SRP: draw her over <paramref name="cam"/>'s finished image, now (call when the camera has
         /// finished rendering — its post-processing included).
         /// </summary>
-        public void DrawNow(Camera cam)
+        /// <param name="cam">The camera that has just finished.</param>
+        /// <param name="keptDepth">Test against the depth <see cref="KeepDepth"/> kept, not the one bound now.</param>
+        public void DrawNow(Camera cam, bool keptDepth = false)
         {
-            if (!Show) return;
-            Pull(Ring);
-            if (!Prepare(cam, srp: true, cam.targetTexture != null, DepthTest && Shader.GetGlobalTexture(IdGameDepth) != null)) return;
+            // No copy (a platform that cannot copy it): the depth bound now, as before.
+            bool kept = keptDepth && haveKeptDepth;
+            bool test = kept || (DepthTest && Shader.GetGlobalTexture(IdGameDepth) != null);
+            if (!Show || !Prepare(cam, srp: true, cam.targetTexture != null, test, block)) return;
+            if (kept) block.SetTexture(IdGameDepth, this.keptDepth);
             cmd.Clear();
             if (cam.targetTexture != null) cmd.SetRenderTarget(cam.targetTexture);
             else cmd.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
-            cmd.DrawProcedural(Matrix4x4.identity, mat, 0, MeshTopology.Triangles, 3);
+            cmd.DrawProcedural(Matrix4x4.identity, mat, 0, MeshTopology.Triangles, 3, 1, block);
             Graphics.ExecuteCommandBuffer(cmd);
+        }
+
+        /// <summary>
+        /// SRP, drawing at the end of the whole context (a camera stack's final blit would cover her
+        /// at her camera's end): keep a copy of the depth texture bound NOW, at the camera's end — by
+        /// the context's end it is the depth of whichever camera with one rendered last (a video
+        /// camera, a mirror), and her main picture would be hidden by that camera's walls.
+        /// </summary>
+        public void KeepDepth()
+        {
+            haveKeptDepth = false;
+            if (!Show || !DepthTest || disposed || SystemInfo.copyTextureSupport == CopyTextureSupport.None) return;
+            var src = Compat.AsRenderTexture(Shader.GetGlobalTexture(IdGameDepth));
+            if (src == null || !src.IsCreated()) return;
+            if (keptDepth == null || keptDepth.width != src.width || keptDepth.height != src.height || keptDepth.format != src.format
+                || keptDepth.depth != src.depth || keptDepth.antiAliasing != src.antiAliasing || keptDepth.dimension != src.dimension
+                || keptDepth.volumeDepth != src.volumeDepth)
+            {
+                if (keptDepth != null) UnityEngine.Object.Destroy(keptDepth);
+                keptDepth = new RenderTexture(src.descriptor) { name = "Astra kept depth", hideFlags = HideFlags.HideAndDontSave };
+                keptDepth.Create();
+            }
+            Graphics.CopyTexture(src, keptDepth);
+            haveKeptDepth = true;
         }
 
         /// <summary>
         /// The Built-in pipeline: <paramref name="cam"/> draws her itself, from a command buffer it runs
         /// after its image effects (attached once; the game's depth texture is switched on for it).
-        /// Call before it renders (pre-cull): this sets what that pass draws, or hides it.
+        /// Call before it renders (pre-cull): this records what that buffer draws this frame.
         /// </summary>
         public void PrepareBuiltIn(Camera cam)
         {
-            Pull(Ring);
             if (attached != cam)
             {
                 DetachBuiltIn();
                 cam.depthTextureMode |= DepthTextureMode.Depth;
-                cmd.Clear();
-                cmd.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
-                cmd.DrawProcedural(Matrix4x4.identity, mat, 0, MeshTopology.Triangles, 3);
                 cam.AddCommandBuffer(CameraEvent.AfterImageEffects, cmd);
                 attached = cam;
             }
+            cmd.Clear();
             // Built-in binds the game's depth during the camera's own render (we switched it on).
-            if (!Show || !Prepare(cam, srp: false, cam.targetTexture != null, depthTest: true))
-                mat.SetVector(IdOut, Vector4.zero); // opacity 0: the pass discards every pixel
+            if (!Show || !Prepare(cam, srp: false, cam.targetTexture != null, depthTest: true, block)) return;
+            cmd.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
+            cmd.DrawProcedural(Matrix4x4.identity, mat, 0, MeshTopology.Triangles, 3, 1, block);
         }
 
         void DetachBuiltIn()
@@ -216,50 +328,59 @@ namespace Astra.Unity
         }
 
         /// <summary>
-        /// For a pass a pipeline adapter records INSIDE the camera's render (URP 17's render graph):
-        /// take the newest frame and set everything the pass reads. The adapter then draws
-        /// <see cref="Material"/> with the game's depth texture bound as <c>_CameraDepthTexture</c>
-        /// in its own property block. False when there is nothing to draw.
+        /// For a pass a pipeline adapter records INSIDE the camera's render: take the newest frame of
+        /// the camera's view and put everything the pass reads into <paramref name="into"/> (copied by
+        /// the draw that uses it). The adapter adds the game's depth texture where its pipeline needs
+        /// it bound. False when there is nothing to draw.
         /// </summary>
         /// <param name="cam">The camera being rendered.</param>
         /// <param name="intoTexture">The pass draws into a render texture (not the back buffer).</param>
-        public bool PrepareForPass(Camera cam, bool intoTexture)
+        /// <param name="into">The draw's property block.</param>
+        public bool PrepareForPass(Camera cam, bool intoTexture, MaterialPropertyBlock into)
         {
-            if (!Show) return false;
-            Pull(Ring);
-            return Prepare(cam, srp: true, intoTexture, depthTest: true);
+            // An adapter's pass may outlive the foundation (stood down after a fault): draw nothing then.
+            return !disposed && Show && Prepare(cam, srp: true, intoTexture, depthTest: true, into);
         }
 
-        /// <summary>Set everything the pass reads for <paramref name="cam"/>; false when there is nothing to show.</summary>
-        bool Prepare(Camera cam, bool srp, bool intoTexture, bool depthTest)
+        /// <summary>Put everything the pass reads for <paramref name="cam"/> in <paramref name="b"/>;
+        /// false when there is nothing to show.</summary>
+        bool Prepare(Camera cam, bool srp, bool intoTexture, bool depthTest, MaterialPropertyBlock b)
         {
             var s = settings;
-            if (Ring == null || !haveFrame || !shots.Find(shown.HostFrame, out var then)) return false;
+            if (disposed || Ring == null || !Pick(cam, out var v, out var then)) return false;
+            b.Clear(); // nothing an earlier draw set (a kept depth) may leak into this one
 
-            var t = cam.transform;
-            Vector3 right = t.right, up = t.up, fwd = t.forward;
-            float tanY = Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            // The present view's axes. A mirror's camera renders the proper view flipped left to
+            // right: its x axis is the proper camera's left.
+            var now = CameraPose.Of(cam);
+            Vector3 right = now.Mirrored ? -now.Right : now.Right, up = now.Up, fwd = now.Fwd;
             // Rows of the rotation from the present view to the one she was drawn in, and her eye then.
-            var eye = then.Pos - t.position;
-            mat.SetVector(IdRot0, new Vector4(Vector3.Dot(then.Right, right), Vector3.Dot(then.Right, up), Vector3.Dot(then.Right, fwd), 0));
-            mat.SetVector(IdRot1, new Vector4(Vector3.Dot(then.Up, right), Vector3.Dot(then.Up, up), Vector3.Dot(then.Up, fwd), 0));
-            mat.SetVector(IdRot2, new Vector4(Vector3.Dot(then.Fwd, right), Vector3.Dot(then.Fwd, up), Vector3.Dot(then.Fwd, fwd), 0));
-            mat.SetVector(IdEyeThen, new Vector4(Vector3.Dot(eye, right), Vector3.Dot(eye, up), Vector3.Dot(eye, fwd), 0));
-            mat.SetVector(IdTanNow, new Vector4(tanY * cam.aspect, tanY, 0, 0));
-            mat.SetVector(IdTanThen, new Vector4(then.TanX, then.TanY, 0, 0));
-            mat.SetVector(IdSize, new Vector4(colour.width, colour.height, 1f / colour.width, 1f / colour.height));
-            mat.SetTexture(IdColour, colour);
-            mat.SetTexture(IdDepth, depth);
-
-            mat.SetVector(IdZParams, ZParams(cam.nearClipPlane, cam.farClipPlane));
-            mat.SetVector(IdTest, new Vector4(depthTest ? 1 : 0, s.DepthBias.Value, s.DepthSoftness.Value, 0));
-            // Which way up the target is: an SRP's pass gets it worked out here; inside a
-            // Built-in camera, 0 = "ask _ProjectionParams", which Unity sets for that target.
+            var eye = then.Pos - now.Pos;
+            b.SetVector(IdRot0, new Vector4(Vector3.Dot(then.Right, right), Vector3.Dot(then.Right, up), Vector3.Dot(then.Right, fwd), 0));
+            b.SetVector(IdRot1, new Vector4(Vector3.Dot(then.Up, right), Vector3.Dot(then.Up, up), Vector3.Dot(then.Up, fwd), 0));
+            b.SetVector(IdRot2, new Vector4(Vector3.Dot(then.Fwd, right), Vector3.Dot(then.Fwd, up), Vector3.Dot(then.Fwd, fwd), 0));
+            b.SetVector(IdEyeThen, new Vector4(Vector3.Dot(eye, right), Vector3.Dot(eye, up), Vector3.Dot(eye, fwd), 0));
+            // The camera's OWN projection, not its field of view: a mirror's camera is given an
+            // explicit (oblique, other-aspect) matrix. Its x/y rows give the rays; the GPU form of
+            // the whole matrix turns the game's depth into metres and her metres into depth.
+            var p = cam.projectionMatrix;
+            b.SetVector(IdProjNow, new Vector4(p.m00, p.m11, p.m02, p.m12));
+            var g = GL.GetGPUProjectionMatrix(p, false); // the platform's depth range; y is never flipped here
+            b.SetMatrix(IdGpuProj, g);
+            b.SetMatrix(IdInvGpuProj, g.inverse);
+            bool gl = SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore || SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3;
+            b.SetVector(IdZNdc, gl ? new Vector4(2, -1, 0, 0) : new Vector4(1, 0, 0, 0)); // depth texel → NDC z
+            b.SetVector(IdTanThen, new Vector4(then.TanX, then.TanY, 0, 0));
+            b.SetVector(IdSize, new Vector4(v.Colour.width, v.Colour.height, 1f / v.Colour.width, 1f / v.Colour.height));
+            b.SetTexture(IdColour, v.Colour);
+            b.SetTexture(IdDepth, v.Depth);
+            b.SetVector(IdTest, new Vector4(depthTest ? 1 : 0, s.DepthBias.Value, s.DepthSoftness.Value, 0));
+            // Which way up the target is: an SRP's pass gets it worked out here; inside a Built-in
+            // camera, 0 = "ask _ProjectionParams", which Unity sets for that target.
             float flip = !srp ? 0 : GL.GetGPUProjectionMatrix(Matrix4x4.identity, intoTexture).m11 < 0 ? -1 : 1;
-            mat.SetVector(IdOut, new Vector4(flip, WriteLinear(s) ? 1 : 0, 1, 0));
+            b.SetVector(IdOut, new Vector4(flip, WriteLinear(s) ? 1 : 0, 1, 0));
             return true;
         }
-
 
         static bool WriteLinear(Settings s)
         {
@@ -271,25 +392,20 @@ namespace Astra.Unity
             }
         }
 
-        /// <summary>Unity's <c>_ZBufferParams</c> for a camera: linear eye depth = 1 / (z·raw + w).</summary>
-        static Vector4 ZParams(float near, float far)
+        static void Release(View v)
         {
-            float x = SystemInfo.usesReversedZBuffer ? -1 + far / near : 1 - far / near;
-            float y = SystemInfo.usesReversedZBuffer ? 1 : far / near;
-            return new Vector4(x, y, x / far, y / far);
-        }
-
-        void Release()
-        {
-            if (colour != null) UnityEngine.Object.Destroy(colour);
-            if (depth != null) UnityEngine.Object.Destroy(depth);
-            colour = depth = null;
+            if (v.Colour != null) UnityEngine.Object.Destroy(v.Colour);
+            if (v.Depth != null) UnityEngine.Object.Destroy(v.Depth);
+            v.Colour = v.Depth = null;
         }
 
         public void Dispose()
         {
+            disposed = true;
+            Show = false;
             DetachBuiltIn();
-            Release();
+            if (keptDepth != null) UnityEngine.Object.Destroy(keptDepth);
+            foreach (var v in views.Values) Release(v);
             cmd.Release();
             if (mat != null) UnityEngine.Object.Destroy(mat);
             if (bundle != null) bundle.Unload(true);

@@ -21,6 +21,24 @@ namespace Astra.Bridge
         public IntPtr Depth;
     }
 
+    /// <summary>Her SHADOW CASTER (flag 64) — see the protocol's "caster": a coarse copy of her body in
+    /// the pose of the frame's picture, placed in the game's world (glTF axes), for the game's own
+    /// shadow maps. Every pointer is valid only while the frame is (see <see cref="FrameRing.StillValid"/>).</summary>
+    public struct CasterView
+    {
+        public int Vertices, Triangles;
+        /// <summary>The same for the same triangles, in any engine process: upload them only when it changes.</summary>
+        public ulong Topology;
+        /// <summary>Her placement point; every position is relative to it.</summary>
+        public Vec3 Origin;
+        /// <summary><see cref="Vertices"/> × f32[3]: metres from <see cref="Origin"/>.</summary>
+        public IntPtr Positions;
+        /// <summary><see cref="Vertices"/> × f32[3] unit normals.</summary>
+        public IntPtr Normals;
+        /// <summary><see cref="Triangles"/> × u16[3], counter-clockwise seen from the outside (glTF).</summary>
+        public IntPtr Indices;
+    }
+
     /// <summary>One published frame, read in place from the ring.</summary>
     public struct RingFrame
     {
@@ -32,10 +50,19 @@ namespace Astra.Bridge
         public int Width, Height;
         public float Near, Far, FovY;
         public uint Flags;
+        /// <summary>Which view (the <c>cam</c>'s <c>view</c>) the frame was drawn for: 0 = the main
+        /// camera. An engine without views writes 0.</summary>
+        public int View;
         /// <summary>The camera position it was rendered from (glTF world, verbatim).</summary>
         public Vec3 CamPos;
         public float Echo0, Echo1, Echo2;
+        /// <summary>Capture and publish times on the ENGINE's clock: each engine process starts its own,
+        /// so they order nothing across a restart.</summary>
         public long CaptureNs, PublishNs;
+        /// <summary>The header counter's value this frame was announced with: it keeps counting across
+        /// engine restarts and game switches, so the larger is the newer. 0 = an engine from before
+        /// views, which does not write it.</summary>
+        public long Number;
 
         /// <summary>Width×Height RGBA8, premultiplied, display-encoded (sRGB), rows top-down.</summary>
         public IntPtr Colour;
@@ -45,6 +72,8 @@ namespace Astra.Bridge
         public int PlaneBytes;
         public bool HasSun;
         public SunView Sun;
+        public bool HasCaster;
+        public CasterView Caster;
     }
 
     /// <summary>
@@ -57,9 +86,11 @@ namespace Astra.Bridge
     public sealed unsafe class FrameRing : IDisposable
     {
         public const uint Magic = 0x5450434D; // 'M','C','P','T'
-        public const uint FlagDepthNdc = 1, FlagBottomUp = 2, FlagReversedZ = 4, FlagLinearDepth = 8, FlagNoPlane3 = 16, FlagSunView = 32;
+        public const uint FlagDepthNdc = 1, FlagBottomUp = 2, FlagReversedZ = 4, FlagLinearDepth = 8, FlagNoPlane3 = 16, FlagSunView = 32, FlagCaster = 64;
         const uint SunMagic = 0x564E5553; // 'S','U','N','V'
         const int SunHeader = 128;
+        const uint CasterMagic = 0x54534143; // 'C','A','S','T'
+        const int CasterHeader = 64;
         const int DescBase = 256, DescStride = 128;
 
         readonly RingMapping map;
@@ -129,12 +160,20 @@ namespace Astra.Bridge
             long counter = Volatile.Read(ref *(long*)(b + 32));
             if (counter == seen) return false;
             int slot = Volatile.Read(ref *(int*)(b + 40));
-            if (slot < 0 || slot >= Slots) return false;
+            if (slot < 0 || slot >= Slots || !Read(slot, out f)) return false;
+            seen = counter;
+            return true;
+        }
+
+        /// <summary>One slot's frame, whole (its seq even before and after the descriptor was read and
+        /// every size inside the mapping), or false.</summary>
+        bool Read(int slot, out RingFrame f)
+        {
+            f = default;
             byte* d = b + DescBase + DescStride * slot;
             long seq = Volatile.Read(ref *(long*)d);
-            if ((seq & 1) != 0) return false;
+            if ((seq & 1) != 0 || seq == 0) return false;
             Thread.MemoryBarrier();
-
             int w = *(int*)(d + 24), h = *(int*)(d + 28);
             if (w < 0 || h < 0 || w > MaxWidth || h > MaxHeight) return false;
             long plane = 4L * w * h;
@@ -153,8 +192,10 @@ namespace Astra.Bridge
             f.Echo0 = *(float*)(d + 72);
             f.Echo1 = *(float*)(d + 76);
             f.Echo2 = *(float*)(d + 80);
+            f.View = *(int*)(d + 84);
             f.CaptureNs = *(long*)(d + 88);
             f.PublishNs = *(long*)(d + 96);
+            f.Number = *(long*)(d + 104);
             f.Colour = (IntPtr)data;
             f.Depth = (IntPtr)(data + plane);
             f.PlaneBytes = (int)plane;
@@ -180,10 +221,63 @@ namespace Astra.Bridge
                 }
             }
 
+            long at = *(uint*)(d + 112);
+            if ((f.Flags & FlagCaster) != 0 && at > 0 && at % 4 == 0 && at + CasterHeader <= stride)
+            {
+                byte* c = data + at;
+                int v = *(int*)(c + 4), t = *(int*)(c + 8);
+                if (*(uint*)c == CasterMagic && v > 0 && v <= ushort.MaxValue && t > 0 && t <= 1 << 20
+                    && at + CasterHeader + 24L * v + 6L * t <= stride)
+                {
+                    f.HasCaster = true;
+                    f.Caster = new CasterView
+                    {
+                        Vertices = v,
+                        Triangles = t,
+                        Topology = *(ulong*)(c + 16),
+                        Origin = new Vec3(*(double*)(c + 24), *(double*)(c + 32), *(double*)(c + 40)),
+                        Positions = (IntPtr)(c + CasterHeader),
+                        Normals = (IntPtr)(c + CasterHeader + 12L * v),
+                        Indices = (IntPtr)(c + CasterHeader + 24L * v),
+                    };
+                }
+            }
+
             Thread.MemoryBarrier();
-            if (Volatile.Read(ref *(long*)d) != seq) return false;
-            seen = counter;
-            return true;
+            return Volatile.Read(ref *(long*)d) == seq;
+        }
+
+        /// <summary>
+        /// The newest whole frame of ONE view, if one newer than <paramref name="seenNumber"/> is in the
+        /// ring (start from 0; on success it moves to that frame's <see cref="RingFrame.Number"/>). The
+        /// header's latest-slot pointer names the newest frame of ANY view, so the slots are scanned.
+        /// Frames are ordered by their PUBLISH NUMBER, never the engine's frame number or its clock:
+        /// the ring outlives an engine, and a restarted engine counts its frames and its time from
+        /// zero again while the slots still hold the old one's frames.
+        /// </summary>
+        public bool TryLatestOf(int view, ref long seenNumber, out RingFrame frame)
+        {
+            frame = default;
+            long best = seenNumber;
+            bool found = false;
+            for (int slot = 0; slot < Slots; slot++)
+            {
+                if (!Read(slot, out var f) || f.View != view || f.Number <= best) continue;
+                best = f.Number;
+                frame = f;
+                found = true;
+            }
+            if (found)
+            {
+                seenNumber = best;
+                return true;
+            }
+            // An engine from before views numbers no frame and draws only view 0: its latest slot is
+            // the newest, announced by the header counter, which is the same number.
+            int latest = Volatile.Read(ref *(int*)(b + 40));
+            if (view == 0 && latest >= 0 && latest < Slots && Read(latest, out var old) && old.Number == 0)
+                return TryLatest(ref seenNumber, out frame);
+            return false;
         }
 
         /// <summary>Is <paramref name="f"/> still the frame its slot holds? Ask AFTER copying from it.</summary>

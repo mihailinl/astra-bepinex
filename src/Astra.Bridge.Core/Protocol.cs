@@ -99,6 +99,23 @@ namespace Astra.Bridge
     }
 
     /// <summary>The game's sun, for <c>light</c>.</summary>
+    /// <summary>One point or spot light of the game, as <c>light</c>'s <c>lamps</c> carry it. Its
+    /// light at a distance d is <c>Color · Intensity / d² · (1 − (d/Range)⁴)²</c>, times a spot's cone
+    /// (full inside <see cref="CosInner"/>, none outside <see cref="CosOuter"/>); <see cref="Intensity"/>
+    /// is on the sun's scale.</summary>
+    public struct Lamp
+    {
+        public Vec3 Pos;
+        public double Range;
+        /// <summary>Linear RGB, normalised (the brightest channel 1).</summary>
+        public Vec3 Color;
+        public double Intensity;
+        /// <summary>A spot (else a point light): where it points, and its cone's cosines.</summary>
+        public bool Spot;
+        public Vec3 Aim;
+        public double CosOuter, CosInner;
+    }
+
     public struct Sun
     {
         /// <summary>Unit direction TOWARD the sun.</summary>
@@ -138,18 +155,40 @@ namespace Astra.Bridge
     {
         public const int ProtocolVersion = 1;
 
+        /// <summary>The highest view a <c>cam</c> may name.</summary>
+        public const int MaxView = 7;
+
+        /// <summary>The most lamps one <c>light</c> may carry.</summary>
+        public const int MaxLamps = 8;
+
+        /// <summary>A light level the engine takes: 0..16.</summary>
+        static double Level(double v) => Math.Max(0, Math.Min(16, v));
+
         [ThreadStatic] static JsonWriter writer;
         [ThreadStatic] static string rejection;
 
         /// <summary>Why the last builder on this thread returned null.</summary>
         public static string Rejection => rejection;
 
-        public static string Hello(string client, string token)
+        public static string Hello(string client, string token) => Hello(client, token, null);
+
+        /// <param name="client">Who is asking (a log line on the engine's side).</param>
+        /// <param name="token">The engine's bridge token, if it has one.</param>
+        /// <param name="shadow">Which of her shadows the game reads: <c>"sun"</c> (her view from the
+        /// sun), <c>"caster"</c> (her shadow caster), <c>"both"</c>, <c>"none"</c>; null = not said,
+        /// which the engine takes for the sun view. Each costs the engine every frame.</param>
+        public static string Hello(string client, string token, string shadow)
         {
             var w = Begin("hello").Num("v", ProtocolVersion).Str("client", client ?? "unknown");
             if (!string.IsNullOrEmpty(token)) w.Str("token", token);
+            if (!string.IsNullOrEmpty(shadow)) w.Str("shadow", shadow);
             return End(w);
         }
+
+        /// <summary>The main camera's <c>cam</c> (view 0) — the 0.2 signature, kept so a mod built
+        /// against it still binds.</summary>
+        public static string Cam(long id, Vec3 pos, Vec3 fwd, Vec3 up, double fovY, int width, int height, double[] echo = null) =>
+            Cam(id, pos, fwd, up, fovY, width, height, echo, 0);
 
         /// <param name="id">The game's frame id; it comes back in the published frame.</param>
         /// <param name="pos">The eye.</param>
@@ -159,8 +198,12 @@ namespace Astra.Bridge
         /// <param name="width">Picture width wanted (the engine scales an oversize one down).</param>
         /// <param name="height">Picture height wanted.</param>
         /// <param name="echo">Up to 3 numbers copied into the frame verbatim (may be null).</param>
-        public static string Cam(long id, Vec3 pos, Vec3 fwd, Vec3 up, double fovY, int width, int height, double[] echo = null)
+        /// <param name="view">Which VIEW this camera is (0..7): each is drawn separately, with the same
+        /// pose of her — the main camera is 0, a video camera or a mirror another. The picture's size
+        /// follows view 0; another view's width/height give only its aspect.</param>
+        public static string Cam(long id, Vec3 pos, Vec3 fwd, Vec3 up, double fovY, int width, int height, double[] echo, int view)
         {
+            if (view < 0 || view > MaxView) return Reject($"cam: view {view} is outside 0..{MaxView}");
             if (!pos.IsFinite || !Direction(fwd) || !Direction(up)) return Reject("cam: a non-finite or zero vector");
             if (!(fovY >= 1 && fovY <= 179)) return Reject($"cam: fovY {fovY} is outside 1..179");
             if (width < 1 || height < 1 || width > 8192 || height > 8192) return Reject($"cam: size {width}x{height}");
@@ -170,6 +213,7 @@ namespace Astra.Bridge
             var w = Begin("cam").Num("id", id).Vec("pos", pos).Vec("fwd", fwd).Vec("up", up)
                 .Num("fovY", fovY).Num("w", width).Num("h", height);
             if (n > 0) w.Nums("echo", echo, n);
+            if (view != 0) w.Num("view", view);
             return End(w);
         }
 
@@ -218,7 +262,14 @@ namespace Astra.Bridge
         public static string Resume() => End(Begin("resume"));
 
         /// <summary>The light of the game's world around her; both parts null hands her own light back.</summary>
-        public static string Light(Sun? sun, Vec3? ambient)
+        public static string Light(Sun? sun, Vec3? ambient) => Light(sun, ambient, null, null);
+
+        /// <param name="sun">The key light; null = hers.</param>
+        /// <param name="ambient">One ambient colour; null = hers (or the cube's, for an engine that knows it).</param>
+        /// <param name="cube">The ambient on a surface facing +X, −X, +Y, −Y, +Z, −Z (the bridge's axes):
+        /// six colours, or null.</param>
+        /// <param name="lamps">At most eight point and spot lights, strongest first; null or empty = none.</param>
+        public static string Light(Sun? sun, Vec3? ambient, Vec3[] cube, IList<Lamp> lamps)
         {
             var w = Begin("light");
             if (sun.HasValue)
@@ -234,7 +285,41 @@ namespace Astra.Bridge
             if (ambient.HasValue)
             {
                 if (!ambient.Value.IsFinite) return Reject("light: a non-finite ambient");
-                w.Vec("ambient", ambient.Value);
+                w.Vec("ambient", new Vec3(Level(ambient.Value.X), Level(ambient.Value.Y), Level(ambient.Value.Z)));
+            }
+            if (cube != null)
+            {
+                if (cube.Length != 6) return Reject("light: an ambient cube has six faces");
+                var faces = new double[18];
+                for (int i = 0; i < 6; i++)
+                {
+                    if (!cube[i].IsFinite) return Reject("light: a non-finite ambient cube");
+                    faces[3 * i] = Level(cube[i].X);
+                    faces[3 * i + 1] = Level(cube[i].Y);
+                    faces[3 * i + 2] = Level(cube[i].Z);
+                }
+                w.Nums("ambientCube", faces, 18);
+            }
+            if (lamps != null && lamps.Count > 0)
+            {
+                if (lamps.Count > MaxLamps) return Reject($"light: {lamps.Count} lamps, at most {MaxLamps}");
+                w.OpenArray("lamps");
+                foreach (var l in lamps)
+                {
+                    if (!l.Pos.IsFinite || !l.Color.IsFinite || !Vec3.Finite(l.Range) || !Vec3.Finite(l.Intensity) || !(l.Range > 0))
+                        return Reject("light: a lamp with a non-finite or empty part");
+                    w.Item().Vec("pos", l.Pos).Num("range", Math.Min(l.Range, 1e4))
+                        .Vec("color", new Vec3(Level(l.Color.X), Level(l.Color.Y), Level(l.Color.Z)))
+                        .Num("intensity", Math.Max(0, Math.Min(1e4, l.Intensity)));
+                    if (l.Spot)
+                    {
+                        if (!Direction(l.Aim) || !Vec3.Finite(l.CosOuter) || !Vec3.Finite(l.CosInner)) return Reject("light: a spot with no aim");
+                        double outer = Math.Max(-1, Math.Min(1, l.CosOuter)), inner = Math.Max(outer, Math.Min(1, l.CosInner));
+                        w.Open("spot").Vec("dir", l.Aim).Nums("cos", new[] { outer, inner }, 2).Close();
+                    }
+                    w.Close();
+                }
+                w.CloseArray();
             }
             return End(w);
         }
@@ -269,6 +354,9 @@ namespace Astra.Bridge
         public string Shm;
         public int MaxWidth;
         public int MaxHeight;
+        /// <summary>How many views (<c>cam.view</c> 0..Views−1) the engine draws; 0 = an engine from
+        /// before views, which takes EVERY <c>cam</c> for the main camera — send it no other view.</summary>
+        public int Views;
 
         /// <summary>Null when <paramref name="m"/> is not a hello.</summary>
         public static HelloReply From(Dictionary<string, object> m)
@@ -282,6 +370,7 @@ namespace Astra.Bridge
                 Shm = m.TryGetValue("shm", out var s) ? s as string : null,
                 MaxWidth = Int(m, "maxW"),
                 MaxHeight = Int(m, "maxH"),
+                Views = Int(m, "views"),
             };
         }
 

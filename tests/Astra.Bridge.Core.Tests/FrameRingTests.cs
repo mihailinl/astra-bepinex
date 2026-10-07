@@ -35,10 +35,13 @@ public class FrameRingTests : IDisposable
     void Flush() => File.WriteAllBytes(path, mem);
 
     /// <summary>Publish a w×h frame into <paramref name="slot"/> the way the engine does.</summary>
-    void Publish(int slot, long counter, long host, int w, int h, long seq = 2, uint flags = FrameRing.FlagLinearDepth | FrameRing.FlagNoPlane3)
+    /// <paramref name="ns"/> is the engine's publish clock (default: later publishes, later times);
+    /// <paramref name="numbered"/> = false writes no publish number, as an engine from before views.
+    void Publish(int slot, long counter, long host, int w, int h, long seq = 2, uint flags = FrameRing.FlagLinearDepth | FrameRing.FlagNoPlane3, int view = 0, long? ns = null, bool numbered = true)
     {
         long d = 256 + 128 * slot;
         Put(d, seq);
+        Put(d + 84, view);
         Put(d + 8, 100 + counter);
         Put(d + 16, host);
         Put(d + 24, (uint)w);
@@ -51,6 +54,8 @@ public class FrameRingTests : IDisposable
         Put(d + 56, 2.5);
         Put(d + 64, -3.5);
         Put(d + 72, 7f);
+        Put(d + 96, ns ?? 5000 + 1000 * counter);
+        Put(d + 104, numbered ? counter : 0L);
         long data = Header + slot * Stride;
         for (int i = 0; i < w * h; i++)
         {
@@ -100,6 +105,61 @@ public class FrameRingTests : IDisposable
         Assert.False(ring.StillValid(ref f));
     }
 
+    /// <summary>Several views share the ring: each reader finds the newest frame of ITS view, whatever
+    /// the latest-slot pointer says.</summary>
+    [Fact]
+    public void each_view_finds_its_own_newest_frame()
+    {
+        Publish(0, counter: 1, host: 10, w: 2, h: 2, view: 0);   // engine frame 101
+        Publish(1, counter: 2, host: 11, w: 2, h: 2, view: 1);   // 102
+        Publish(2, counter: 3, host: 12, w: 2, h: 2, view: 0);   // 103, the latest slot
+        using var ring = FrameRing.Open(path);
+        long seen0 = 0, seen1 = 0, seen2 = 0;
+        Assert.True(ring.TryLatestOf(0, ref seen0, out var f0));
+        Assert.Equal((12L, 0, 3L), (f0.HostFrame, f0.View, seen0));
+        Assert.True(ring.TryLatestOf(1, ref seen1, out var f1));
+        Assert.Equal((11L, 1), (f1.HostFrame, f1.View));
+        Assert.False(ring.TryLatestOf(2, ref seen2, out _), "no frame of view 2");
+        Assert.False(ring.TryLatestOf(0, ref seen0, out _), "nothing newer of view 0");
+        Publish(1, counter: 4, host: 13, w: 2, h: 2, seq: 3, view: 1); // view 1's slot being rewritten
+        Assert.False(ring.TryLatestOf(1, ref seen1, out _));
+    }
+
+    /// <summary>The ring file outlives an engine: a restarted one counts its frames AND its clock from
+    /// zero while the slots still hold the old one's. Only the publish number keeps counting.</summary>
+    [Fact]
+    public void a_restarted_engines_frames_win_over_the_old_ones_still_in_the_ring()
+    {
+        Publish(0, counter: 900, host: 900, w: 2, h: 2, ns: 3_600_000_000_000); // an hour into the old run
+        using var ring = FrameRing.Open(path);
+        long seen = 0;
+        Assert.True(ring.TryLatestOf(0, ref seen, out var old));
+        Assert.Equal(900L, old.HostFrame);
+        Publish(1, counter: 901, host: 1, w: 2, h: 2, ns: 40_000_000);  // the new engine's first frame…
+        Put(256 + 128 + 8, 1L);                                           // …numbered 1 by the engine
+        Flush();
+        Assert.True(ring.TryLatestOf(0, ref seen, out var fresh), "a later publish is newer, whatever its frame or its time");
+        Assert.Equal(1L, fresh.HostFrame);
+    }
+
+    /// <summary>An engine from before views writes no publish number: view 0 is read through the
+    /// latest-slot pointer, and nothing is found for another view.</summary>
+    [Fact]
+    public void an_engine_without_views_is_read_through_its_latest_slot()
+    {
+        Publish(2, counter: 4, host: 40, w: 2, h: 2, numbered: false);
+        Publish(0, counter: 5, host: 41, w: 2, h: 2, numbered: false);
+        using var ring = FrameRing.Open(path);
+        long seen = 0, seen1 = 0;
+        Assert.True(ring.TryLatestOf(0, ref seen, out var f));
+        Assert.Equal((41L, 5L), (f.HostFrame, seen));
+        Assert.False(ring.TryLatestOf(0, ref seen, out _), "nothing new since");
+        Assert.False(ring.TryLatestOf(1, ref seen1, out _));
+        Publish(1, counter: 6, host: 42, w: 2, h: 2, numbered: false);
+        Assert.True(ring.TryLatestOf(0, ref seen, out f));
+        Assert.Equal(42L, f.HostFrame);
+    }
+
     [Fact]
     public void a_descriptor_larger_than_the_ring_is_refused()
     {
@@ -143,6 +203,44 @@ public class FrameRingTests : IDisposable
         long seen = 0;
         Assert.True(ring.TryLatest(ref seen, out var f));
         Assert.False(f.HasSun);
+    }
+
+    /// <summary>Her shadow caster is found through the descriptor's +112 offset behind flag 64, every
+    /// array inside the slot; one whose arrays would run past the slot is not handed out.</summary>
+    [Fact]
+    public void the_shadow_caster_is_found_behind_flag_64()
+    {
+        int w = 2, h = 2;
+        long data = Header + 1 * Stride;
+        long off = 8L * w * h; // right after the picture (no sun view)
+        long c = data + off;
+        Put(c, 0x54534143u);
+        Put(c + 4, 3u);
+        Put(c + 8, 1u);
+        Put(c + 16, 0x0123456789abcdefL);
+        Put(c + 24, 100.5);
+        Put(c + 32, -2.0);
+        Put(c + 40, 7.25);
+        Put(c + 64 + 12 * 2 + 4, 1.5f);                         // the third position's y
+        BitConverter.GetBytes((ushort)2).CopyTo(mem, c + 64 + 24 * 3 + 4); // the third index
+        Put(256 + 128 * 1 + 112, (uint)off);
+        Publish(1, counter: 4, host: 4, w: w, h: h, flags: FrameRing.FlagLinearDepth | FrameRing.FlagNoPlane3 | FrameRing.FlagCaster);
+        using var ring = FrameRing.Open(path);
+        long seen = 0;
+        Assert.True(ring.TryLatestOf(0, ref seen, out var f));
+        Assert.True(f.HasCaster);
+        Assert.Equal((3, 1, 0x0123456789abcdefUL), (f.Caster.Vertices, f.Caster.Triangles, f.Caster.Topology));
+        Assert.Equal(new Vec3(100.5, -2, 7.25), f.Caster.Origin);
+        unsafe
+        {
+            Assert.Equal(1.5f, ((float*)f.Caster.Positions)[7]);
+            Assert.Equal(2, ((ushort*)f.Caster.Indices)[2]);
+        }
+
+        Put(c + 4, 60000u); // 60 000 vertices: far past the slot
+        Publish(1, counter: 5, host: 5, w: w, h: h, flags: FrameRing.FlagLinearDepth | FrameRing.FlagNoPlane3 | FrameRing.FlagCaster);
+        Assert.True(ring.TryLatestOf(0, ref seen, out f));
+        Assert.False(f.HasCaster);
     }
 
     [Theory]

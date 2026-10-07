@@ -25,9 +25,9 @@ namespace Astra.Unity
 
         /// <summary>
         /// Does URP run its render graph? A game may switch it off ("Compatibility Mode", the
-        /// URP_COMPATIBILITY_MODE define since 6000.3): URP then calls a pass's Execute, never
-        /// RecordRenderGraph, and its depth texture is a lasting one — the foundation's
-        /// end-of-camera path is right there. Called by reflection (<c>UrpHook</c>).
+        /// URP_COMPATIBILITY_MODE define since 6000.3): URP then calls the pass's Execute, never
+        /// RecordRenderGraph — the pass implements both. Called by reflection (<c>UrpHook</c>), for
+        /// the log.
         /// </summary>
         static bool RenderGraphOn()
         {
@@ -72,6 +72,24 @@ namespace Astra.Unity
                 ConfigureInput(ScriptableRenderPassInput.Depth);
             }
 
+            /// <summary>
+            /// URP in Compatibility Mode (no render graph): URP calls Execute instead. Her pass then
+            /// draws into the camera's colour target right after post-processing — BEFORE the
+            /// camera's final blit and anything a game captures at AfterRendering (Content Warning's
+            /// video recorder) — with the camera's depth texture bound globally (ConfigureInput).
+            /// </summary>
+#pragma warning disable CS0618, CS0672 // the Compatibility-Mode API is obsolete, and it is what such a game runs
+            public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
+            {
+                var cam = renderingData.cameraData.camera;
+                if (!Compositor.PrepareForPass(cam, intoTexture: true, block)) return;
+                var cmd = CommandBufferPool.Get("Astra");
+                cmd.DrawProcedural(Matrix4x4.identity, Compositor.Material, 0, MeshTopology.Triangles, 3, 1, block);
+                context.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+            }
+#pragma warning restore CS0618, CS0672
+
             public override void RecordRenderGraph(RenderGraph graph, ContextContainer frame)
             {
                 var res = frame.Get<UniversalResourceData>();
@@ -89,7 +107,7 @@ namespace Astra.Unity
                     b.AllowPassCulling(false);
                     b.SetRenderFunc((PassData p, RasterGraphContext ctx) =>
                     {
-                        if (!p.Compositor.PrepareForPass(p.Camera, p.IntoTexture)) return;
+                        if (!p.Compositor.PrepareForPass(p.Camera, p.IntoTexture, p.Block)) return;
                         p.Block.SetTexture(IdGameDepth, p.Depth);
                         ctx.cmd.DrawProcedural(Matrix4x4.identity, p.Compositor.Material, 0, MeshTopology.Triangles, 3, 1, p.Block);
                     });
