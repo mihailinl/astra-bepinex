@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The bridge's protocol, socket and frame ring, with NO Unity dependency: both the Mono
+       (BepInEx 5) and the IL2CPP (BepInEx 6) plugins ship this one assembly. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Astra.Bridge.Core</AssemblyName>
+    <RootNamespace>Astra.Bridge</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+</Project>

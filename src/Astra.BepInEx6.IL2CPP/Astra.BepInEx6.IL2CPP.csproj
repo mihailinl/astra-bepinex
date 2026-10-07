@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The plugin for IL2CPP Unity games, loaded by BepInEx 6. Unity's API comes from the interop
+       assemblies BepInEx generates for a game on its first run (BepInEx/interop): point
+       Il2CppInteropDir at ANY IL2CPP game's folder (they bind by name at run time, like Mono's). -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>Astra.Unity</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <AstraRuntime>unity-il2cpp</AstraRuntime>
+    <AstraLoader>bepinex6</AstraLoader>
+    <RootNamespace>Astra.Unity</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- BepInEx 6's logger takes interpolated-string handlers (C# 10); this plugin only runs on
+         BepInEx 6's .NET 6, so the newer language costs nothing. -->
+    <LangVersion>10.0</LangVersion>
+    <DefineConstants>$(DefineConstants);IL2CPP</DefineConstants>
+    <BepInExPluginGuid>astra.unity-foundation</BepInExPluginGuid>
+    <BepInExPluginName>Astra</BepInExPluginName>
+    <Il2CppInteropDir Condition="'$(Il2CppInteropDir)' == ''">$(MSBuildThisFileDirectory)../../unity/AstraTestbed/Build/il2cpp/BepInEx/interop</Il2CppInteropDir>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.788" PrivateAssets="all" />
+    <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="$(Il2CppInteropDir)/UnityEngine*.dll" Private="false" />
+    <Reference Include="$(Il2CppInteropDir)/Il2Cppmscorlib.dll" Private="false" />
+    <Reference Include="$(Il2CppInteropDir)/Il2CppSystem*.dll" Private="false" />
+    <Reference Include="$(Il2CppInteropDir)/Unity.RenderPipelines.Core.Runtime.dll" Private="false" />
+  </ItemGroup>
+  <Import Project="../Astra.Unity/Astra.Unity.props" />
+</Project>

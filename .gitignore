@@ -1,0 +1,22 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+.idea/
+TestResults/
+# what tools/pack.sh produces
+artifacts/
+# Unity projects
+unity/*/Library/
+unity/*/Temp/
+unity/*/Logs/
+unity/*/UserSettings/
+unity/*/obj/
+unity/*/Build/
+# …except the shader bundles the plugins embed (a clone builds without Unity)
+!unity/AstraShaders/Build/
+unity/AstraShaders/Build/*
+!unity/AstraShaders/Build/astra-*.bundle
+unity/*/*.csproj
+unity/*/*.sln

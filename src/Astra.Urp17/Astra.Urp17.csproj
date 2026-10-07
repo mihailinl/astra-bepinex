@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Her composite pass for URP 17 (Unity 6), inside the camera's render graph. Compiled against
+       Unity 6 and URP 17, which ship with no NuGet package: UrpRefDir points at a Unity 6 project's
+       Library/ScriptAssemblies (the testbed's, once it has been opened or built). -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>Astra.Urp17</AssemblyName>
+    <RootNamespace>Astra.Unity</RootNamespace>
+    <UrpRefDir Condition="'$(UrpRefDir)' == ''">$(MSBuildThisFileDirectory)../../unity/AstraTestbed/Library/ScriptAssemblies</UrpRefDir>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="UnityEngine.Modules" Version="6000.0.40" IncludeAssets="compile" PrivateAssets="all" />
+    <Reference Include="$(UrpRefDir)/Unity.RenderPipelines.Universal.Runtime.dll" Private="false" />
+    <Reference Include="$(UrpRefDir)/Unity.RenderPipelines.Core.Runtime.dll" Private="false" />
+    <ProjectReference Include="../Astra.BepInEx5/Astra.BepInEx5.csproj" Private="false" />
+  </ItemGroup>
+</Project>

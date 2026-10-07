@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Astra",
+  "classifications": [
+    "Astra",
+    "BepInEx",
+    "Unity",
+    "Mod"
+  ],
+  "identity": "Astra.Unity.Integration",
+  "name": "Astra game integration (BepInEx)",
+  "shortName": "astra-integration",
+  "sourceName": "AstraIntegration",
+  "preferNameDirectory": true,
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "symbols": {
+    "game": {
+      "type": "parameter",
+      "datatype": "text",
+      "isRequired": true,
+      "replaces": "GAME_NAME",
+      "description": "The game's name as players know it (\"PEAK\")."
+    },
+    "id": {
+      "type": "parameter",
+      "datatype": "text",
+      "replaces": "astra.integration-id",
+      "defaultValue": "astra.my-game",
+      "description": "The integration's id: its BepInEx GUID and its marketplace id (\"astra.peak\")."
+    },
+    "runtime": {
+      "type": "parameter",
+      "datatype": "choice",
+      "defaultValue": "mono",
+      "choices": [
+        {
+          "choice": "mono",
+          "description": "A Mono game (<Game>_Data/Managed/Assembly-CSharp.dll exists): BepInEx 5."
+        },
+        {
+          "choice": "il2cpp",
+          "description": "An IL2CPP game (GameAssembly.dll exists): BepInEx 6."
+        }
+      ]
+    },
+    "steamAppId": {
+      "type": "parameter",
+      "datatype": "integer",
+      "replaces": "0000000",
+      "defaultValue": "0000000",
+      "description": "The game's Steam app id (its store page URL has it)."
+    },
+    "gameDir": {
+      "type": "parameter",
+      "datatype": "text",
+      "replaces": "GAME_DIR_PATH",
+      "defaultValue": "",
+      "description": "Where the game is installed (its assemblies are referenced to compile, never shipped)."
+    },
+    "mono": {
+      "type": "computed",
+      "value": "(runtime == \"mono\")"
+    },
+    "runtimeName": {
+      "type": "generated",
+      "generator": "switch",
+      "replaces": "RUNTIME_NAME",
+      "parameters": {
+        "evaluator": "C++",
+        "datatype": "string",
+        "cases": [
+          {
+            "condition": "(runtime == 'mono')",
+            "value": "unity-mono"
+          },
+          {
+            "condition": "(runtime == 'il2cpp')",
+            "value": "unity-il2cpp"
+          }
+        ]
+      }
+    },
+    "loaderName": {
+      "type": "generated",
+      "generator": "switch",
+      "replaces": "LOADER_NAME",
+      "parameters": {
+        "evaluator": "C++",
+        "datatype": "string",
+        "cases": [
+          {
+            "condition": "(runtime == 'mono')",
+            "value": "bepinex5"
+          },
+          {
+            "condition": "(runtime == 'il2cpp')",
+            "value": "bepinex6"
+          }
+        ]
+      }
+    }
+  }
+}

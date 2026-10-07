@@ -1,0 +1,13 @@
+<Project>
+  <!-- Shared by every project. C# 9 compiles to IL any Unity runtime runs (no records / init:
+       those need runtime types an old Mono lacks). -->
+  <PropertyGroup>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Authors>mihailinl and the astra-bepinex contributors</Authors>
+    <Version>0.2.0</Version>
+  </PropertyGroup>
+</Project>

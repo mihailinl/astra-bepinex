@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The SDK a game integration COMPILES against: the foundation's assemblies for both runtimes.
+       NuGet picks by the integration's target: netstandard2.x is a Mono game (BepInEx 5), net6.0 an
+       IL2CPP game (BepInEx 6). An integration references it compile-only
+       (ExcludeAssets="runtime"): the foundation is installed in the game as its own item, so an
+       update of it reaches every integration without a rebuild. Build the two plugins first
+       (tools/pack.sh does it in order). -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
+    <PackageId>Astra.Unity.Sdk</PackageId>
+    <Title>Astra Unity SDK</Title>
+    <Description>Build a game integration for Astra: the API of the Astra Unity foundation (BepInEx 5 / Mono and BepInEx 6 / IL2CPP). Reference it compile-only; the foundation is installed in the game.</Description>
+    <PackageTags>astra;bepinex;unity;mod;companion</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)../../artifacts/nuget</PackageOutputPath>
+    <MonoOut>$(MSBuildThisFileDirectory)../Astra.BepInEx5/bin/$(Configuration)/netstandard2.0/</MonoOut>
+    <Il2CppOut>$(MSBuildThisFileDirectory)../Astra.BepInEx6.IL2CPP/bin/$(Configuration)/net6.0/</Il2CppOut>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="$(MonoOut)Astra.Unity.dll;$(MonoOut)Astra.Unity.xml;$(MonoOut)Astra.Bridge.Core.dll;$(MonoOut)Astra.Bridge.Core.xml" Pack="true" PackagePath="lib/netstandard2.0" />
+    <None Include="$(Il2CppOut)Astra.Unity.dll;$(Il2CppOut)Astra.Unity.xml;$(Il2CppOut)Astra.Bridge.Core.dll;$(Il2CppOut)Astra.Bridge.Core.xml" Pack="true" PackagePath="lib/net6.0" />
+  </ItemGroup>
+</Project>

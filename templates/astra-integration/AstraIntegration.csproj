@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Astra for GAME_NAME: a game integration on the Astra Unity foundation.
+       The foundation is installed in the game once and updates by itself, so it is referenced
+       COMPILE-ONLY here (ExcludeAssets="runtime") and never shipped with this plugin. The game's own
+       assemblies are referenced from its install folder, also never shipped: set GameDir below,
+       on the command line (-p:GameDir=…) or in GameDir.props.user (ignored by git). -->
+  <PropertyGroup>
+<!--#if (mono) -->
+    <!-- Unity 2021.2+ (netstandard2.1). A game on Unity 2021.1 or older: netstandard2.0. -->
+    <TargetFramework>netstandard2.1</TargetFramework>
+<!--#else -->
+    <TargetFramework>net6.0</TargetFramework>
+<!--#endif -->
+    <AstraRuntime>RUNTIME_NAME</AstraRuntime>
+    <AstraLoader>LOADER_NAME</AstraLoader>
+    <AssemblyName>AstraIntegration</AssemblyName>
+    <RootNamespace>AstraIntegration</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <BepInExPluginGuid>astra.integration-id</BepInExPluginGuid>
+    <BepInExPluginName>Astra for GAME_NAME</BepInExPluginName>
+    <Version>0.1.0</Version>
+    <SteamAppId>0000000</SteamAppId>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <Import Project="GameDir.props.user" Condition="Exists('GameDir.props.user')" />
+  <PropertyGroup>
+    <GameDir Condition="'$(GameDir)' == ''">GAME_DIR_PATH</GameDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Astra.Unity.Sdk" Version="0.2.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
+<!--#if (mono) -->
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" PrivateAssets="all" />
+<!--#else -->
+    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.788" PrivateAssets="all" />
+<!--#endif -->
+  </ItemGroup>
+
+  <!-- The game's Unity and code assemblies, compile-only. -->
+  <ItemGroup Condition="'$(GameDir)' != ''">
+<!--#if (mono) -->
+    <!-- Every managed assembly of the game (its classes derive from its libraries' — Photon,
+         Mirror…), but not the .NET ones the SDK brings. -->
+    <Reference Include="$(GameDir)/*_Data/Managed/*.dll"
+               Exclude="$(GameDir)/*_Data/Managed/mscorlib.dll;$(GameDir)/*_Data/Managed/netstandard.dll;$(GameDir)/*_Data/Managed/System*.dll;$(GameDir)/*_Data/Managed/Mono.*.dll;$(GameDir)/*_Data/Managed/Microsoft.*.dll"
+               Private="false" />
+<!--#else -->
+    <Reference Include="$(GameDir)/BepInEx/interop/*.dll" Private="false" />
+<!--#endif -->
+  </ItemGroup>
+<!--#if (mono) -->
+  <ItemGroup Condition="'$(GameDir)' == ''">
+    <!-- No game folder: Unity's API alone (code that names the game's own types needs GameDir). -->
+    <PackageReference Include="UnityEngine.Modules" Version="2021.3.45" IncludeAssets="compile" PrivateAssets="all" />
+  </ItemGroup>
+<!--#endif -->
+
+  <!-- The installed-version marker the Astra client reads, beside the plugin. -->
+  <Target Name="AstraItemMarker" AfterTargets="Build">
+    <WriteLinesToFile File="$(OutDir)astra-item.json" Overwrite="true" WriteOnlyWhenDifferent="true"
+      Lines="{&quot;id&quot;:&quot;$(BepInExPluginGuid)&quot;,&quot;version&quot;:&quot;$(Version)&quot;,&quot;kind&quot;:&quot;game-integration&quot;,&quot;runtime&quot;:&quot;$(AstraRuntime)&quot;,&quot;loader&quot;:&quot;$(AstraLoader)&quot;,&quot;steam_appid&quot;:$(SteamAppId)}" />
+  </Target>
+</Project>

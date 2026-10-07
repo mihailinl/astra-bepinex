@@ -1,0 +1,18 @@
+<Project>
+  <!-- The Unity-side sources BOTH plugins compile (Mono and IL2CPP differ only in Compat.cs, by the
+       IL2CPP symbol), plus what they embed: the shader bundles. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)**/*.cs" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../unity/AstraShaders/Build/astra-*.bundle" LogicalName="%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)../Astra.Bridge.Core/Astra.Bridge.Core.csproj" />
+  </ItemGroup>
+
+  <!-- The installed-version MARKER the Astra client reads (never DLL file versions, which BepInEx
+       tooling rewrites): astra-item.json beside the plugin, in every build and every package. -->
+  <Target Name="AstraItemMarker" AfterTargets="Build">
+    <WriteLinesToFile File="$(OutDir)astra-item.json" Overwrite="true" WriteOnlyWhenDifferent="true"
+      Lines="{&quot;id&quot;:&quot;$(BepInExPluginGuid)&quot;,&quot;version&quot;:&quot;$(Version)&quot;,&quot;kind&quot;:&quot;library&quot;,&quot;runtime&quot;:&quot;$(AstraRuntime)&quot;,&quot;loader&quot;:&quot;$(AstraLoader)&quot;,&quot;protocol&quot;:1}" />
+  </Target>
+</Project>

@@ -1,0 +1,13 @@
+# The Astra marketplace manifest for this integration (PROPOSED schema: the marketplace's kinds land
+# after the current registry wave; until then this file documents what the item is).
+id = "astra.integration-id"
+kind = "game-integration"
+version = "0.1.0"
+name = "Astra for GAME_NAME"
+requires = [{ id = "astra.unity-foundation", range = ">=0.2, <1" }]
+
+[target]
+game = { steam_appid = 0000000, product = "GAME_NAME" }
+runtime = "RUNTIME_NAME"
+loader = "LOADER_NAME"
+platforms = ["windows"]   # the game's build; "windows" covers Proton

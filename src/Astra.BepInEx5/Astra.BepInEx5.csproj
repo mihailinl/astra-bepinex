@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The Astra foundation for MONO Unity games, loaded by BepInEx 5. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Astra.Unity</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <AstraRuntime>unity-mono</AstraRuntime>
+    <AstraLoader>bepinex5</AstraLoader>
+    <RootNamespace>Astra.Unity</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <BepInExPluginGuid>astra.unity-foundation</BepInExPluginGuid>
+    <BepInExPluginName>Astra</BepInExPluginName>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" PrivateAssets="all" />
+    <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
+    <!-- Compiled against Unity 2021.3's API: everything used there exists in every later Unity. -->
+    <PackageReference Include="UnityEngine.Modules" Version="2021.3.45" IncludeAssets="compile" PrivateAssets="all" />
+  </ItemGroup>
+  <Import Project="../Astra.Unity/Astra.Unity.props" />
+</Project>
