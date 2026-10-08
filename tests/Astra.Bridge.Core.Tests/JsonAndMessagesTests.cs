@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
 using Astra.Bridge;
@@ -226,6 +227,42 @@ public class JsonAndMessagesTests
     {
         Assert.Equal("{\"t\":\"hello\",\"v\":1,\"client\":\"g\"}", Messages.Hello("g", null));
         Assert.Equal("{\"t\":\"hello\",\"v\":1,\"client\":\"g\",\"shadow\":\"caster\"}", Messages.Hello("g", null, "caster"));
+    }
+
+    /// <summary>M4: the game/foundation/integration fields are additive and each omitted alone.</summary>
+    [Fact]
+    public void the_hello_can_say_who_the_game_and_foundation_are()
+    {
+        Assert.Equal(
+            "{\"t\":\"hello\",\"v\":1,\"client\":\"astra-unity/PEAK\",\"shadow\":\"caster\",\"game\":\"PEAK\",\"foundation\":\"0.5.0\",\"integration\":\"astra.peak\"}",
+            Messages.Hello("astra-unity/PEAK", null, "caster", "PEAK", "0.5.0", "astra.peak"));
+        Assert.Equal("{\"t\":\"hello\",\"v\":1,\"client\":\"g\"}", Messages.Hello("g", null, null, null, null, null));
+        Assert.Equal("{\"t\":\"hello\",\"v\":1,\"client\":\"g\",\"foundation\":\"0.5.0\"}", Messages.Hello("g", null, null, null, "0.5.0", null));
+    }
+
+    [Fact]
+    public void a_top_level_string_array_is_read_but_a_mixed_one_is_skipped()
+    {
+        var m = JsonReader.ReadObject("{\"caps\":[\"views\",\"light.fog\"],\"ids\":[1,2],\"mixed\":[\"a\",2],\"empty\":[]}");
+        Assert.Equal(new List<string> { "views", "light.fog" }, m["caps"]);
+        Assert.Equal(new List<string>(), m["empty"]);
+        Assert.False(m.ContainsKey("ids"));
+        Assert.False(m.ContainsKey("mixed"));
+    }
+
+    /// <summary>M4: an engine that never said <c>caps</c> supports everything (today's behaviour); one
+    /// that did only supports what it listed.</summary>
+    [Fact]
+    public void the_hello_reply_reads_caps_and_an_absent_list_supports_everything()
+    {
+        var withCaps = HelloReply.From(JsonReader.ReadObject("{\"t\":\"hello\",\"v\":1,\"caps\":[\"views\",\"light.fog\"]}"));
+        Assert.Equal(new List<string> { "views", "light.fog" }, withCaps.Caps);
+        Assert.True(HelloReply.Supports(withCaps.Caps, "views"));
+        Assert.False(HelloReply.Supports(withCaps.Caps, "caster"));
+
+        var noCaps = HelloReply.From(JsonReader.ReadObject("{\"t\":\"hello\",\"v\":1}"));
+        Assert.Null(noCaps.Caps);
+        Assert.True(HelloReply.Supports(noCaps.Caps, "anything-at-all"));
     }
 
     [Fact]

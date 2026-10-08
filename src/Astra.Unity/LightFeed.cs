@@ -77,6 +77,10 @@ namespace Astra.Unity
         /// fog override.</summary>
         public Func<(bool enabled, float density, Color color)> PipelineFog { get; set; }
 
+        /// <summary>Send <c>light.fog</c> at all — off for an engine whose <c>caps</c> left out
+        /// <c>"light.fog"</c>; true (the default) for one that never said <c>caps</c>.</summary>
+        public bool SendFog { get; set; } = true;
+
         /// <summary>URP's <c>2^postExposure</c> multiplier from an active ColorAdjustments override
         /// (1 = no change, every pipeline but URP 17): every light VALUE this feed sends — sun/extra
         /// sun intensities, the ambient scalar and cube, a lamp's intensity, the fog colour — is
@@ -156,7 +160,7 @@ namespace Astra.Unity
             double? open = ambientSrc != "local" ? (double?)Open(chest, ignore) : null;
 
             Lamps(chest, ignore, camera, playerRoot);
-            Fog? fog = BuildFog();
+            Fog? fog = SendFog ? BuildFog() : null;
 
             // The cube's mean as the one ambient colour too: an engine from before the cube reads that.
             double r = 0, g = 0, b = 0;

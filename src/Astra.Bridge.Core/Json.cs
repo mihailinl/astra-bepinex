@@ -196,7 +196,14 @@ namespace Astra.Bridge
                     p.Expect(':');
                     p.Ws();
                     char c = p.Peek();
-                    if (c == '{' || c == '[') p.Skip();
+                    if (c == '[')
+                    {
+                        // An array of only strings (e.g. hello's "caps") is kept; anything else
+                        // inside it is skipped exactly as before this existed — never a partial list.
+                        var arr = p.StringArrayOrSkip();
+                        if (arr != null) result[key] = arr;
+                    }
+                    else if (c == '{') p.Skip();
                     else result[key] = p.Scalar();
                     p.Ws();
                     if (p.Peek() == ',') { p.Pos++; continue; }
@@ -276,6 +283,31 @@ namespace Astra.Bridge
                         default: throw new FormatException($"bad escape '\\{e}'");
                     }
                 }
+            }
+
+            /// <summary>A top-level array read as a <see cref="List{T}"/> of <see cref="string"/> —
+            /// null when anything inside it is not a string (a number, an object, a nested array),
+            /// which this still consumes in full, same as <see cref="Skip"/> would.</summary>
+            public List<string> StringArrayOrSkip()
+            {
+                Expect('[');
+                Ws();
+                var list = new List<string>();
+                bool ok = true;
+                if (Peek() != ']')
+                {
+                    while (true)
+                    {
+                        Ws();
+                        if (Peek() == '"') list.Add(String());
+                        else { ok = false; Skip(); }
+                        Ws();
+                        if (Peek() == ',') { Pos++; continue; }
+                        break;
+                    }
+                }
+                Expect(']');
+                return ok ? list : null;
             }
 
             /// <summary>Skip one value of any kind (objects and arrays nest).</summary>

@@ -221,6 +221,9 @@ namespace Astra.Unity
                     // Her shadow here is the game's own, cast by her caster: the engine need not make
                     // her view from the sun (and makes neither when shadows are off).
                     link.Shadow = settings.Shadows.Value ? "caster" : "none";
+                    link.Game = integration?.Game ?? Application.productName;
+                    link.Foundation = AstraSdk.Version;
+                    link.Integration = integration?.Id;
                     ringSession = 0;
                     link.Start();
                 }
@@ -435,10 +438,12 @@ namespace Astra.Unity
                 compositor?.Reset(ring.Counter);
                 shadow?.Reset(ring.Counter);
                 // Views besides the main one: as many as the engine draws and its ring holds (none for an
-                // engine from before views, which would take every camera for the main one).
+                // engine from before views, which would take every camera for the main one, or one that
+                // named its caps without "views").
                 // Half the slots at most: a wake writes one frame per view, and the next wake must not
                 // come round to a slot the game is still copying the last one's from.
-                views.Count = Math.Min(link.Hello.Views, ring.Slots / 2) - 1;
+                int viewsOffered = link.Supports("views") ? link.Hello.Views : 0;
+                views.Count = Math.Min(viewsOffered, ring.Slots / 2) - 1;
                 log.LogInfo($"frames from {ring.Source} ({ring.MaxWidth}x{ring.MaxHeight})");
             }
             catch (System.IO.IOException e)
@@ -506,12 +511,15 @@ namespace Astra.Unity
             Fenced("send", () =>
             {
                 if (!her.Placed) return;
-                if (settings.SendLight.Value)
+                // An engine that named its caps and left "light" off cannot read the message at all;
+                // one that never said caps (today's behaviour) gets it as always.
+                if (settings.SendLight.Value && link.Supports("light"))
                 {
                     // The integration's sun runs under ITS guard: a throw there drops the integration
                     // (the scene's sun takes over), never the foundation.
                     var choose = integration?.Sun;
                     Light sun = choose != null ? Guarded("sun", () => choose(), () => null) : null;
+                    light.SendFog = link.Supports("light.fog");
                     light.Physical = hdrp;
                     if (hdrp)
                     {

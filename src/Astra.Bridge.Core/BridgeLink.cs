@@ -32,6 +32,7 @@ namespace Astra.Bridge
         volatile bool ready;
         int session;
         string lastState;
+        readonly HashSet<string> loggedErrors = new HashSet<string>(); // per CONNECTION: cleared on every new one
 
         /// <summary>How long ago (<see cref="Environment.TickCount"/> ms) the owning game last proved,
         /// through <see cref="MarkWanted"/>, that it is alive and still wants this link. Read on the
@@ -77,14 +78,41 @@ namespace Astra.Bridge
         public HelloReply Hello => hello;
 
         /// <summary>Which of her shadows this game reads, said in every hello (<see cref="Messages.Hello(string, string, string)"/>);
-        /// null = not said. Set it before <see cref="Start"/>.</summary>
+        /// null = not said. Read fresh on every (re)connect, like <see cref="Game"/>.</summary>
         public string Shadow { get; set; }
+
+        /// <summary>This game's display name (<c>hello.game</c>); null = not said (the engine derives
+        /// one from <see cref="client"/>). Read fresh on every (re)connect.</summary>
+        public string Game { get; set; }
+
+        /// <summary>This foundation's version (<c>hello.foundation</c>); null = not said.</summary>
+        public string Foundation { get; set; }
+
+        /// <summary>The game's integration id, when one is registered (<c>hello.integration</c>);
+        /// null = none.</summary>
+        public string Integration { get; set; }
 
         /// <summary>Bumped on every engine hello: a new session — map the ring again.</summary>
         public int Session => Volatile.Read(ref session);
 
         /// <summary>The last <c>error</c> the engine sent, or the last connection failure.</summary>
         public string LastError { get; private set; }
+
+        /// <summary>Does the connected engine declare <paramref name="cap"/> (<c>hello.caps</c>)? True
+        /// when no hello has arrived yet, or it named no <c>caps</c> at all (an engine from before
+        /// capability negotiation): the foundation then keeps sending what it always sent.</summary>
+        public bool Supports(string cap) => HelloReply.Supports(hello?.Caps, cap);
+
+        /// <summary>The <c>shadow</c> word to actually send: an engine that never said <c>caps</c>
+        /// gets today's behaviour unchanged (it may be old enough to REFUSE an unknown word outright);
+        /// a known engine that does not list <c>"caster"</c> is sent nothing, which it takes for the
+        /// sun view — never a word it might not understand.</summary>
+        string EffectiveShadow()
+        {
+            string shadow = Shadow;
+            if (string.IsNullOrEmpty(shadow) || shadow == "sun") return shadow;
+            return Supports("caster") ? shadow : null;
+        }
 
         public void Start()
         {
@@ -124,7 +152,9 @@ namespace Astra.Bridge
                 {
                     socket = WebSocketClient.Connect(host, port, "/", 2000);
                     ws = socket;
-                    if (!socket.SendText(Messages.Hello(client, token, Shadow))) throw new IOException("closed before hello");
+                    loggedErrors.Clear(); // a new connection: an engine error is worth saying again
+                    if (!socket.SendText(Messages.Hello(client, token, EffectiveShadow(), Game, Foundation, Integration)))
+                        throw new IOException("closed before hello");
                     State($"connected to Astra on {host}:{port}");
                     while (true)
                     {
@@ -176,7 +206,9 @@ namespace Astra.Bridge
             if (m.TryGetValue("t", out var t) && (t as string) == "error")
             {
                 LastError = m.TryGetValue("msg", out var msg) ? msg as string : "error";
-                Log?.Invoke($"Astra refused a message: {LastError}");
+                // Once per distinct engine error text per connection: a game that keeps sending
+                // something the engine refuses must not flood the log at frame rate.
+                if (loggedErrors.Add(LastError)) Log?.Invoke($"Astra refused a message: {LastError}");
             }
         }
 

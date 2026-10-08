@@ -206,11 +206,25 @@ namespace Astra.Bridge
         /// <param name="shadow">Which of her shadows the game reads: <c>"sun"</c> (her view from the
         /// sun), <c>"caster"</c> (her shadow caster), <c>"both"</c>, <c>"none"</c>; null = not said,
         /// which the engine takes for the sun view. Each costs the engine every frame.</param>
-        public static string Hello(string client, string token, string shadow)
+        public static string Hello(string client, string token, string shadow) => Hello(client, token, shadow, null, null, null);
+
+        /// <param name="client">Who is asking (a log line on the engine's side).</param>
+        /// <param name="token">The engine's bridge token, if it has one.</param>
+        /// <param name="shadow">Which of her shadows the game reads: <c>"sun"</c> (her view from the
+        /// sun), <c>"caster"</c> (her shadow caster), <c>"both"</c>, <c>"none"</c>; null = not said,
+        /// which the engine takes for the sun view. Each costs the engine every frame.</param>
+        /// <param name="game">The game's display name; null = not said (the engine derives it from
+        /// <paramref name="client"/>'s part after the last <c>/</c>).</param>
+        /// <param name="foundation">This foundation's version; null = not said.</param>
+        /// <param name="integration">The game's integration id, when one is registered; null = none.</param>
+        public static string Hello(string client, string token, string shadow, string game, string foundation, string integration)
         {
             var w = Begin("hello").Num("v", ProtocolVersion).Str("client", client ?? "unknown");
             if (!string.IsNullOrEmpty(token)) w.Str("token", token);
             if (!string.IsNullOrEmpty(shadow)) w.Str("shadow", shadow);
+            if (!string.IsNullOrEmpty(game)) w.Str("game", game);
+            if (!string.IsNullOrEmpty(foundation)) w.Str("foundation", foundation);
+            if (!string.IsNullOrEmpty(integration)) w.Str("integration", integration);
             return End(w);
         }
 
@@ -488,6 +502,15 @@ namespace Astra.Bridge
         /// before views, which takes EVERY <c>cam</c> for the main camera — send it no other view.</summary>
         public int Views;
 
+        /// <summary>What this engine accepts beyond protocol v1's first contract (<c>BRIDGE.md</c>'s
+        /// <c>CAPS</c>); null = an engine from before capability negotiation.</summary>
+        public List<string> Caps;
+
+        /// <summary>Is <paramref name="cap"/> one of <paramref name="caps"/>? Null <paramref name="caps"/>
+        /// means an engine from before capability negotiation: taken for "supports everything a
+        /// foundation without this check already sent", never a refusal.</summary>
+        public static bool Supports(List<string> caps, string cap) => caps == null || caps.Contains(cap);
+
         /// <summary>Null when <paramref name="m"/> is not a hello.</summary>
         public static HelloReply From(Dictionary<string, object> m)
         {
@@ -501,6 +524,7 @@ namespace Astra.Bridge
                 MaxWidth = Int(m, "maxW"),
                 MaxHeight = Int(m, "maxH"),
                 Views = Int(m, "views"),
+                Caps = m.TryGetValue("caps", out var caps) ? caps as List<string> : null,
             };
         }
 
