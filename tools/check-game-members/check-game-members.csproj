@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- STATIC verification that a game integration's reflection lookups (Astra.Sdk.GameType) resolve
+       in a real, installed copy of the game — without running the game, and without this tool
+       (or any integration) ever shipping the game's files. Point it at the game's own
+       `<Game>_Data/Managed` folder (read-only) and a list of (type, member, kind, expectedType)
+       rows; it loads the assemblies for INSPECTION ONLY (System.Reflection.MetadataLoadContext —
+       never Assembly.Load, so nothing executes) and reports whether each lookup's target exists
+       with a compatible shape. See README.md in this folder. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- Overrides the repo-wide Directory.Build.props pin (LangVersion 9, for the Unity-targeting
+         projects): this is a standalone net8.0 dev/CI tool, not Unity code. -->
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>CheckGameMembers</RootNamespace>
+    <AssemblyName>check-game-members</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="8.0.0" />
+  </ItemGroup>
+</Project>
