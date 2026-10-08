@@ -110,7 +110,9 @@ namespace Astra.Unity
         /// <param name="playerRoot">The local player's root, for <c>held</c> too; null = unknown.</param>
         /// <param name="look">The game integration's taste for her light band (<c>UseLook</c>); null =
         /// the engine's.</param>
-        public string Message(Vector3 feet, float height, HashSet<int> ignore, bool chosen, Light choice, Camera camera, GameObject playerRoot, Look? look)
+        /// <param name="wantSummary">Build <see cref="Summary"/> this call (M5) — false the ~19 times
+        /// out of 20 a second its caller would throw the interpolated text away unread.</param>
+        public string Message(Vector3 feet, float height, HashSet<int> ignore, bool chosen, Light choice, Camera camera, GameObject playerRoot, Look? look, bool wantSummary = true)
         {
             if (Time.unscaledTime < nextSend) return null;
             nextSend = Time.unscaledTime + 0.05f;
@@ -175,19 +177,22 @@ namespace Astra.Unity
                 b += f.Z / 6;
             }
             string json = Messages.Light(s, new Vec3(Fine(r), Fine(g), Fine(b)), cube, lamps, ambientSrc, open, suns, look, fog);
-            int held = 0;
-            foreach (var l in lamps) if (l.Held) held++;
-            Summary = $"sun {(s.HasValue ? $"{s.Value.Intensity:0.##} × visible {s.Value.Visible:0.##}" : "none")}" +
-                      (suns.Count > 0 ? $", +{suns.Count} sun{(suns.Count == 1 ? "" : "s")}" : "") +
-                      $", ambient {(r + g + b) / 3:0.####} ({ambientSrc}" +
-                      (ambientSrc != "local" ? $", open {openShare:0.##}" : "") + ")" +
-                      $", {lamps.Count} lamp(s) of {candidates.Count}" +
-                      (held > 0 ? $" ({held} held)" : "") +
-                      (look.HasValue ? $", look {look.Value.Floor:0.##}..{look.Value.Ceiling:0.##}" : "") +
-                      (fog.HasValue ? $", fog {fog.Value.Mode} " +
-                          (fog.Value.Mode == "linear" ? $"{fog.Value.Start:0.#}..{fog.Value.End:0.#}m" : $"density {fog.Value.Density:0.###}") : "") +
-                      (Physical ? $", exposure {Exposure:0.######}" : "") +
-                      (PostExposure != 1f ? $", post-exposure ×{PostExposure:0.###}" : "");
+            if (wantSummary)
+            {
+                int held = 0;
+                foreach (var l in lamps) if (l.Held) held++;
+                Summary = $"sun {(s.HasValue ? $"{s.Value.Intensity:0.##} × visible {s.Value.Visible:0.##}" : "none")}" +
+                          (suns.Count > 0 ? $", +{suns.Count} sun{(suns.Count == 1 ? "" : "s")}" : "") +
+                          $", ambient {(r + g + b) / 3:0.####} ({ambientSrc}" +
+                          (ambientSrc != "local" ? $", open {openShare:0.##}" : "") + ")" +
+                          $", {lamps.Count} lamp(s) of {candidates.Count}" +
+                          (held > 0 ? $" ({held} held)" : "") +
+                          (look.HasValue ? $", look {look.Value.Floor:0.##}..{look.Value.Ceiling:0.##}" : "") +
+                          (fog.HasValue ? $", fog {fog.Value.Mode} " +
+                              (fog.Value.Mode == "linear" ? $"{fog.Value.Start:0.#}..{fog.Value.End:0.#}m" : $"density {fog.Value.Density:0.###}") : "") +
+                          (Physical ? $", exposure {Exposure:0.######}" : "") +
+                          (PostExposure != 1f ? $", post-exposure ×{PostExposure:0.###}" : "");
+            }
             if (json == null || json == last) return null;
             last = json;
             return json;

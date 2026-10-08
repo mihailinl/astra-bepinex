@@ -138,11 +138,34 @@ namespace Astra.Bridge
         {
             if (double.IsNaN(v) || double.IsInfinity(v))
                 throw new ArgumentOutOfRangeException(nameof(v), v, "JSON has no non-finite numbers");
-            // Integral values are written without a fraction; everything else round-trips ("R").
+            // Integral values — most of a message's numbers (ids, sizes, a unit vector's 0/1/-1) —
+            // are written digit by digit (M5): netstandard2.0 has no Span-based TryFormat, so the
+            // ToString() this replaces allocated a throwaway string on every call. Everything else
+            // round-trips ("R"); its own temporary string has no allocation-free equivalent here.
             if (v == Math.Floor(v) && Math.Abs(v) < 1e15)
-                sb.Append(((long)v).ToString(CultureInfo.InvariantCulture));
+                AppendLong(sb, (long)v);
             else
                 sb.Append(v.ToString("R", CultureInfo.InvariantCulture));
+        }
+
+        /// <summary>A whole number, culture-invariant by construction (pure ASCII digit math — never
+        /// locale digits or a locale's own minus sign). <paramref name="value"/> is always well inside
+        /// <see cref="long"/>'s range here (<see cref="Number"/>'s <c>Math.Abs(v) &lt; 1e15</c> guard),
+        /// so negating it can never overflow.</summary>
+        static void AppendLong(StringBuilder sb, long value)
+        {
+            if (value < 0)
+            {
+                sb.Append('-');
+                value = -value;
+            }
+            AppendDigits(sb, value);
+        }
+
+        static void AppendDigits(StringBuilder sb, long value)
+        {
+            if (value >= 10) AppendDigits(sb, value / 10);
+            sb.Append((char)('0' + (int)(value % 10)));
         }
 
         void Quote(string s)

@@ -29,6 +29,7 @@ namespace Astra.Bridge
         readonly object sendLock = new object();
         readonly Random maskRng = new Random();
         byte[] sendBuf = new byte[1024];
+        byte[] encodeBuf = new byte[1024]; // SendText's reusable UTF-8 scratch (M5)
 
         // Receive side: bytes read past the handshake are kept here first.
         readonly byte[] head = new byte[14];
@@ -122,12 +123,23 @@ namespace Astra.Bridge
             pendingAt = 0;
         }
 
-        /// <summary>Send one text message. False when the connection is gone (never throws).</summary>
-        public bool SendText(string text) => Send(0x1, text == null ? null : Encoding.UTF8.GetBytes(text));
-
-        bool Send(byte opcode, byte[] payload)
+        /// <summary>Send one text message. False when the connection is gone (never throws). Encodes
+        /// into a reusable buffer (M5) — a camera message goes out at frame rate, and
+        /// <see cref="Encoding.GetBytes(string)"/> allocated a fresh array every single time.</summary>
+        public bool SendText(string text)
         {
-            int len = payload?.Length ?? 0;
+            if (text == null) return Send(0x1, null, 0);
+            lock (sendLock)
+            {
+                int max = Encoding.UTF8.GetMaxByteCount(text.Length);
+                if (encodeBuf.Length < max) encodeBuf = new byte[Math.Max(max, encodeBuf.Length * 2)];
+                int len = Encoding.UTF8.GetBytes(text, 0, text.Length, encodeBuf, 0);
+                return Send(0x1, encodeBuf, len);
+            }
+        }
+
+        bool Send(byte opcode, byte[] payload, int len)
+        {
             lock (sendLock)
             {
                 int headLen = len < 126 ? 2 : len <= 0xFFFF ? 4 : 10;
@@ -208,10 +220,10 @@ namespace Astra.Bridge
                     switch (op)
                     {
                         case 0x8: // close: echo it, then we are done
-                            Send(0x8, payload.Length >= 2 ? new[] { payload[0], payload[1] } : null);
+                            Send(0x8, payload.Length >= 2 ? new[] { payload[0], payload[1] } : null, payload.Length >= 2 ? 2 : 0);
                             return null;
                         case 0x9:
-                            Send(0xA, payload);
+                            Send(0xA, payload, payload.Length);
                             continue;
                         case 0xA:
                             continue;
@@ -266,7 +278,7 @@ namespace Astra.Bridge
         /// <summary>Say goodbye (best effort) and close the socket.</summary>
         public void Close()
         {
-            Send(0x8, new byte[] { 0x03, 0xE8 }); // 1000: normal closure
+            Send(0x8, new byte[] { 0x03, 0xE8 }, 2); // 1000: normal closure
             Dispose();
         }
 

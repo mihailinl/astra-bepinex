@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+using System.Collections.Generic;
 using BepInEx.Configuration;
 
 namespace Astra.Unity
@@ -33,9 +34,10 @@ namespace Astra.Unity
         public ConfigEntry<bool> Shadows;
 
         /// <summary>The player's value if they changed it from the foundation's default, else the
-        /// integration's default when it set one, else the foundation's.</summary>
+        /// integration's default when it set one, else the foundation's. <c>EqualityComparer&lt;T&gt;.Default</c>
+        /// (M5), never <c>object.Equals</c>, which boxes both sides — this runs several times a frame.</summary>
         public static T Pick<T>(ConfigEntry<T> entry, T? integration) where T : struct =>
-            !Equals(entry.Value, (T)entry.DefaultValue) || !integration.HasValue ? entry.Value : integration.Value;
+            !EqualityComparer<T>.Default.Equals(entry.Value, (T)entry.DefaultValue) || !integration.HasValue ? entry.Value : integration.Value;
 
         public static string Pick(ConfigEntry<string> entry, string integration) =>
             entry.Value != (string)entry.DefaultValue || integration == null ? entry.Value : integration;

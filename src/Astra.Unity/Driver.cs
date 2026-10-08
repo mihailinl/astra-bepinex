@@ -99,6 +99,9 @@ namespace Astra.Unity
         {
             Fenced("start", () =>
             {
+                // Constant for the component's life: assigned once (M5), not a new delegate every
+                // RunFrame.
+                frame.HoldImpl = follow.Hold;
                 if (!string.IsNullOrEmpty(settings.Toggle.Value))
                 {
                     try { toggle = (KeyCode)Enum.Parse(typeof(KeyCode), settings.Toggle.Value.Trim(), true); }
@@ -279,11 +282,18 @@ namespace Astra.Unity
                 ? Guarded("player", () => Checked(integration.PlayerLocator(cam)), () => defaultPlayer.Locate(cam, configured, mask))
                 : defaultPlayer.Locate(cam, configured, mask);
             IgnorePlayer(frame.Player?.Root);
-            frame.HoldImpl = follow.Hold;
 
             if (integration != null)
-                foreach (var handler in integration.FrameHandlers.ToArray())
+            {
+                // By index (M5), never ToArray(): a fresh copy of the list every frame, for however
+                // many handlers an integration registered (usually one or two, forever).
+                var handlers = integration.FrameHandlers;
+                for (int i = 0; i < handlers.Count; i++)
+                {
+                    var handler = handlers[i];
                     if (!Guarded("frame handler", () => { handler(frame); return true; }, () => false)) break;
+                }
+            }
 
             var brain = integration?.Brain;
             if (brain == null || !Guarded("brain", () => { brain.Step(frame); Checked(her); return true; }, () => false)) follow.Step(frame);
@@ -533,15 +543,21 @@ namespace Astra.Unity
                     Look? look = integration?.LookFloor is float floor
                         ? new Look { Floor = floor, Ceiling = integration.LookCeiling ?? 1.40f }
                         : (Look?)null;
+                    // What she is lit with, every 10 s when it changed: the line a player pastes when
+                    // she looks wrong. wantSummary (M5) tells Message() to build the interpolated
+                    // Summary text only when it might actually be logged, not on every call (up to
+                    // 20 Hz) only for this comparison to throw it away unread the other ~19 times.
+                    bool wantSummary = Time.unscaledTime > nextLightLog;
                     Send(light.Message(her.Position, HerHeight * scale, ignore, choose != null && integration != null, sun,
-                        cam, frame.Player?.Root, look));
-                    // What she is lit with, every 10 s when it changed: the line a player pastes when she
-                    // looks wrong.
-                    if (Time.unscaledTime > nextLightLog && light.Summary != null && light.Summary != loggedLight)
+                        cam, frame.Player?.Root, look, wantSummary));
+                    if (wantSummary)
                     {
-                        log.LogInfo("her light here: " + light.Summary);
-                        loggedLight = light.Summary;
                         nextLightLog = Time.unscaledTime + 10f;
+                        if (light.Summary != null && light.Summary != loggedLight)
+                        {
+                            log.LogInfo("her light here: " + light.Summary);
+                            loggedLight = light.Summary;
+                        }
                     }
                 }
                 SendCues(frame.Cues);
@@ -568,7 +584,11 @@ namespace Astra.Unity
             // HDRP: her custom pass rides on this camera (attached once per main camera).
             inGraph = srp && (hdrp ? HdrpHook.Ensure(cam, compositor) : UrpHook.Enqueue(cam, compositor));
             string missing = hdrp ? HdrpHook.Missing : UrpHook.Missing;
-            if (srp && !inGraph && missing != null) Once("adapter-fallback", $"compositing after the camera: {missing}");
+            // Guarded (M5): this clause holds for a whole session without the pipeline's adapter, so
+            // without the membership check first, the interpolated string was built EVERY camera begin
+            // even though Once() only ever logs it the first time.
+            if (srp && !inGraph && missing != null && !logged.Contains("adapter-fallback"))
+                Once("adapter-fallback", $"compositing after the camera: {missing}");
         }
 
         /// <summary>Send a built message; a builder that refused its input (null) is said once per reason.</summary>
