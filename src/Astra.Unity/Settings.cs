@@ -68,7 +68,10 @@ namespace Astra.Unity
                 DepthSoftness = c.Bind("Picture", "DepthSoftness", 0.02f, "Metres over which she fades behind a surface."),
                 ColourSpace = c.Bind("Picture", "ColourSpace", "auto",
                     "auto / linear / gamma: how her colours are written into the game's picture. Try the other if she looks too dark or washed out."),
-                MaxPictureHeight = c.Bind("Picture", "MaxPictureHeight", 1080, "Her picture's height at most (the game's aspect is kept). Lower = cheaper."),
+                // 720, not 1080 (H4 interim): until the engine crops to her bounding rect, this
+                // picture is copied and uploaded on the game's main thread every frame she is in it —
+                // 720p keeps that bounded for players before E2 (the crop) ships.
+                MaxPictureHeight = c.Bind("Picture", "MaxPictureHeight", 720, "Her picture's height at most (the game's aspect is kept). Lower = cheaper."),
                 SendLight = c.Bind("Picture", "SendLight", true, "Light her with this game's sun and sky."),
                 Shadows = c.Bind("Picture", "Shadows", true,
                     "Let this game's own lights cast her shadow (a copy of her body that only casts shadows, never drawn)."),
