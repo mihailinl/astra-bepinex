@@ -146,18 +146,58 @@ namespace Astra.Unity
         /// </summary>
         static (bool enabled, float density, Color color) ReadFog(Camera cam)
         {
+            // The scene's global Fog override, and every Local Volumetric Fog box the camera stands
+            // in (how many games build their haze — Lethal Company's indoor and weather fog is only
+            // local boxes): the densest wins.
+            float meanFreePath = float.PositiveInfinity;
+            Color albedo = Color.black;
             var stack = VolumeManager.instance?.stack;
             var fog = stack?.GetComponent<UnityEngine.Rendering.HighDefinition.Fog>();
-            if (fog == null || !fog.active || !fog.enabled.value) return (false, 0f, Color.black);
-            float meanFreePath = Mathf.Max(fog.meanFreePath.value, 0.01f);
-            float density = 1f / meanFreePath;
-            Color albedo = fog.albedo.value;
-            var sh = Ambient(cam);
-            float ambientMean = MeanLuma(sh);
+            if (fog != null && fog.active && fog.enabled.value)
+            {
+                meanFreePath = fog.meanFreePath.value;
+                albedo = fog.albedo.value;
+            }
+            if (cam != null)
+            {
+                RefreshLocalFogs();
+                var at = cam.transform.position;
+                foreach (var box in localFogs)
+                {
+                    if (box == null || !box.isActiveAndEnabled) continue;
+                    var p = box.parameters;
+                    var local = Quaternion.Inverse(box.transform.rotation) * (at - box.transform.position);
+                    if (Mathf.Abs(local.x) > p.size.x * 0.5f || Mathf.Abs(local.y) > p.size.y * 0.5f || Mathf.Abs(local.z) > p.size.z * 0.5f) continue;
+                    if (p.meanFreePath < meanFreePath)
+                    {
+                        meanFreePath = p.meanFreePath;
+                        albedo = p.albedo;
+                    }
+                }
+            }
+            if (float.IsInfinity(meanFreePath)) return (false, 0f, Color.black);
+            float density = 1f / Mathf.Max(meanFreePath, 0.01f);
+            // The fog scatters the light around it into the view: the sky's, where the scene has one;
+            // with none readable (a lamp-lit interior), its albedo at the picture's exposure, which the
+            // engine then holds under her own light.
             float exposure = Exposure(cam);
-            float scale = (exposure > 0 ? exposure : 1f) * ambientMean;
+            float ambientMean = MeanLuma(Ambient(cam));
+            float scale = (exposure > 0 ? exposure : 1f) * (ambientMean > 1e-4f ? ambientMean : 1f);
             Color color = new Color(albedo.r * scale, albedo.g * scale, albedo.b * scale, 1f);
             return (true, density, color);
+        }
+
+        static readonly System.Collections.Generic.List<LocalVolumetricFog> localFogs = new System.Collections.Generic.List<LocalVolumetricFog>();
+        static float nextFogScan;
+
+        /// <summary>The scene's Local Volumetric Fog boxes, rescanned every 2 s (a box can appear with a
+        /// weather change or a level load).</summary>
+        static void RefreshLocalFogs()
+        {
+            if (Time.unscaledTime < nextFogScan) return;
+            nextFogScan = Time.unscaledTime + 2f;
+            localFogs.Clear();
+            localFogs.AddRange(Object.FindObjectsOfType<LocalVolumetricFog>());
         }
 
         /// <summary>The mean luminance of a spherical-harmonics probe's DC term (band 0) — the
