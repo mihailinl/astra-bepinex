@@ -92,7 +92,9 @@ namespace Astra.Unity
         /// <param name="camera">The main camera, for a lamp's <c>held</c> (and, nowhere else, its own
         /// light — a flashlight's cone is never read from the camera).</param>
         /// <param name="playerRoot">The local player's root, for <c>held</c> too; null = unknown.</param>
-        public string Message(Vector3 feet, float height, HashSet<int> ignore, bool chosen, Light choice, Camera camera, GameObject playerRoot)
+        /// <param name="look">The game integration's taste for her light band (<c>UseLook</c>); null =
+        /// the engine's.</param>
+        public string Message(Vector3 feet, float height, HashSet<int> ignore, bool chosen, Light choice, Camera camera, GameObject playerRoot, Look? look)
         {
             if (Time.unscaledTime < nextSend) return null;
             nextSend = Time.unscaledTime + 0.05f;
@@ -151,7 +153,7 @@ namespace Astra.Unity
                 g += f.Y / 6;
                 b += f.Z / 6;
             }
-            string json = Messages.Light(s, new Vec3(Fine(r), Fine(g), Fine(b)), cube, lamps, ambientSrc, open, suns, null);
+            string json = Messages.Light(s, new Vec3(Fine(r), Fine(g), Fine(b)), cube, lamps, ambientSrc, open, suns, look);
             int held = 0;
             foreach (var l in lamps) if (l.Held) held++;
             Summary = $"sun {(s.HasValue ? $"{s.Value.Intensity:0.##} × visible {s.Value.Visible:0.##}" : "none")}" +
@@ -160,6 +162,7 @@ namespace Astra.Unity
                       (ambientSrc != "local" ? $", open {openShare:0.##}" : "") + ")" +
                       $", {lamps.Count} lamp(s) of {candidates.Count}" +
                       (held > 0 ? $" ({held} held)" : "") +
+                      (look.HasValue ? $", look {look.Value.Floor:0.##}..{look.Value.Ceiling:0.##}" : "") +
                       (Physical ? $", exposure {Exposure:0.######}" : "");
             if (json == null || json == last) return null;
             last = json;

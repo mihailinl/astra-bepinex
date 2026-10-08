@@ -54,6 +54,7 @@ The extension points, one interface each, every one with a default that already 
 | `OnFrame` → `FrameContext.Params`: animator facts | `speed` (measured from her motion), `airborne` (`Her.Airborne`) | anything her animation set declares (`climbing`, `altitude`, `underwater`) |
 | `Cues`: animation by name | none | `Play("wave")` on a game event, `Trigger("music_fast")` |
 | `UseSun`: her sun | the scene's sun, else its brightest directional light | a game with its own day cycle or lights |
+| `UseLook`: the band her light is held in | the engine's (floor 0.20, ceiling 1.40) | a game darker or brighter than most (Lethal Company: floor 0.10) |
 | `Defaults` → `IntegrationDefaults` | the foundation's | scale or `MatchPlayerHeight`, distances, ground layers, depth bias |
 | `Events` (planned, needs the engine and daemon, §5) | none | tell Astra's brain what happened: "the player died", "reached the summit", so she can comment |
 

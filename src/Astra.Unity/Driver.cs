@@ -476,8 +476,11 @@ namespace Astra.Unity
                         light.Exposure = HdrpHook.Exposure(cam);
                         light.PipelineAmbient ??= () => HdrpHook.Ambient(main);
                     }
+                    Look? look = integration?.LookFloor is float floor
+                        ? new Look { Floor = floor, Ceiling = integration.LookCeiling ?? 1.40f }
+                        : (Look?)null;
                     Send(light.Message(her.Position, HerHeight * scale, ignore, choose != null && integration != null, sun,
-                        cam, frame.Player?.Root));
+                        cam, frame.Player?.Root, look));
                     // What she is lit with, every 10 s when it changed: the line a player pastes when she
                     // looks wrong.
                     if (Time.unscaledTime > nextLightLog && light.Summary != null && light.Summary != loggedLight)

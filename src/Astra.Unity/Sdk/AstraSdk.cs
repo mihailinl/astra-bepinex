@@ -88,6 +88,7 @@ namespace Astra.Sdk
         internal Func<Camera, bool> ExtraCamera;
         internal IBrain Brain;
         internal Func<Light> Sun;
+        internal float? LookFloor, LookCeiling;
         internal readonly List<Action<FrameContext>> FrameHandlers = new List<Action<FrameContext>>();
 
         internal GameIntegration(string id, string game)
@@ -157,6 +158,20 @@ namespace Astra.Sdk
         public GameIntegration UseSun(Func<Light> sun)
         {
             Sun = sun;
+            return this;
+        }
+
+        /// <summary>
+        /// This game's taste for her light: the band the engine holds it in — how dim she gets where
+        /// the game's light says darkness (<paramref name="floor"/>, the engine's default 0.20) and
+        /// the brightest she approaches (<paramref name="ceiling"/>, default 1.40), as multiples of
+        /// her albedo (the engine bounds them to 0.05..0.40 and 0.8..2.0). Set it only where a look
+        /// at the game asks: a game whose dark is darker than most wants a lower floor.
+        /// </summary>
+        public GameIntegration UseLook(float floor, float ceiling = 1.40f)
+        {
+            LookFloor = floor;
+            LookCeiling = ceiling;
             return this;
         }
 
