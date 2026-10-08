@@ -134,13 +134,8 @@ namespace Astra.Unity
                     : $"compositing after {(contextEnd ? "the frame's cameras" : "the camera")} ({(hdrp ? HdrpHook.Missing : UrpHook.Missing)})");
                 log.LogInfo($"{Application.productName} (Unity {Application.unityVersion}, {SystemInfo.graphicsDeviceType}, " +
                             $"{(srp ? Compat.PipelineClass() : "Built-in pipeline")})");
-                link = new BridgeLink("astra-unity/" + Application.productName, settings.Port.Value,
-                    string.IsNullOrEmpty(settings.Token.Value) ? null : settings.Token.Value);
-                link.Log = m => log.LogInfo(m);
-                // Her shadow here is the game's own, cast by her caster: the engine need not make her
-                // view from the sun (and makes neither when shadows are off).
-                link.Shadow = settings.Shadows.Value ? "caster" : "none";
-                link.Start();
+                // The link itself is started lazily, from LateUpdate: never while there is no way to
+                // draw her (B1 — "the foundation must never hold her when it cannot draw her").
             });
         }
 
@@ -165,6 +160,9 @@ namespace Astra.Unity
             if (faulted) return;
             Fenced("frame", () =>
             {
+                AdoptIntegration();
+                UpdateLink();
+
                 if (link != null && link.Session != ringSession) OpenRing();
                 bool live = link != null && link.Ready && ring != null;
                 // The engine went away: forget her last picture, or it would stay composited — a
@@ -185,19 +183,58 @@ namespace Astra.Unity
                     link.Send(KeepAlive);
                     lastSent = Time.unscaledTime;
                 }
-                AdoptIntegration();
                 var pick = integration?.CameraLocator;
                 if (pick != null)
                 {
-                    main = Guarded("camera", () => pick(), () => Camera.main);
+                    main = Guarded("camera", pick, () => Camera.main);
                 }
                 else if (Time.unscaledTime > nextCameraSearch || main == null || !main.isActiveAndEnabled)
                 {
                     main = Camera.main;
                     nextCameraSearch = Time.unscaledTime + 1f;
                 }
-                if (main != null) RunFrame(main);
+                // Skip her placement and follow logic while there is no picture to draw her into
+                // anyway (M6): the engine disconnected, or the ring is not open yet.
+                if (main != null && live) RunFrame(main);
             });
+        }
+
+        /// <summary>
+        /// B1: the link's lifetime follows whether she can be drawn at all right now — never held
+        /// while she cannot be. Starts it (lazily — never in <see cref="Start"/>) the first time she
+        /// could be shown, tells it every frame that the main thread is alive
+        /// (<see cref="BridgeLink.MarkWanted"/>), and closes it AT ONCE (not after the heartbeat's own
+        /// timeout, which exists for a STALLED main thread, not this one) the moment she stops being
+        /// wanted: the toggle key, <c>General.Enabled</c>, or no compositor at all (an unsupported
+        /// Unity line, platform or pipeline).
+        /// </summary>
+        void UpdateLink()
+        {
+            bool wanted = compositor != null && visible && settings.Enabled.Value;
+            if (wanted)
+            {
+                if (link == null)
+                {
+                    link = new BridgeLink("astra-unity/" + Application.productName, settings.Port.Value,
+                        string.IsNullOrEmpty(settings.Token.Value) ? null : settings.Token.Value);
+                    link.Log = m => log.LogInfo(m);
+                    // Her shadow here is the game's own, cast by her caster: the engine need not make
+                    // her view from the sun (and makes neither when shadows are off).
+                    link.Shadow = settings.Shadows.Value ? "caster" : "none";
+                    ringSession = 0;
+                    link.Start();
+                }
+                link.MarkWanted();
+            }
+            else if (link != null)
+            {
+                link.Dispose();
+                link = null;
+                ringSession = 0;
+                ring?.Dispose();
+                ring = null;
+                if (compositor != null) compositor.Ring = null;
+            }
         }
 
         /// <summary>One frame: locate the player, let the integration set facts, let the brain place her.</summary>
@@ -408,6 +445,11 @@ namespace Astra.Unity
             {
                 log.LogError($"cannot read Astra's frames ({e.Message}). If this game runs under Wine/Proton, " +
                              "set Connection.RingPath to Z:\\dev\\shm\\astra-frame");
+                // B1: without a ring there is nothing to draw her with — let go rather than hold a
+                // claim she can never be shown through. UpdateLink() opens a fresh one next frame.
+                link?.Dispose();
+                link = null;
+                ringSession = 0;
             }
         }
 
@@ -611,6 +653,10 @@ namespace Astra.Unity
                 try { shadow?.Dispose(); }
                 catch (Exception) { /* already broken */ }
                 shadow = null;
+                // B1: a foundation that is broken must let go of her too — never hold her mute.
+                try { link?.Dispose(); }
+                catch (Exception) { /* already broken */ }
+                link = null;
             }
         }
 

@@ -33,6 +33,17 @@ namespace Astra.Bridge
         int session;
         string lastState;
 
+        /// <summary>How long ago (<see cref="Environment.TickCount"/> ms) the owning game last proved,
+        /// through <see cref="MarkWanted"/>, that it is alive and still wants this link. Read on the
+        /// link's OWN thread, on ITS OWN clock — never Unity's <c>Time</c>, which stalls WITH the main
+        /// thread: a frozen game must still be detectable from here.</summary>
+        volatile int wantedAtMs;
+
+        /// <summary>How long a missing heartbeat is tolerated before the link stops (re)connecting.
+        /// Shorter than the engine's own "let her go" timeout (8 s, <c>BRIDGE.md</c>) so a stalled game
+        /// does not re-claim her the instant the engine's timeout fires.</summary>
+        const int WantedTimeoutMs = 2000;
+
         /// <summary>Diagnostics, called on the link's own thread — the sink must be thread-safe.</summary>
         public Action<string> Log;
 
@@ -48,10 +59,19 @@ namespace Astra.Bridge
             this.token = token;
             this.retryMs = Math.Max(250, retryMs);
             this.host = host;
+            // Nothing has proved it is alive yet: wait for a MarkWanted() before ever connecting.
+            wantedAtMs = unchecked(Environment.TickCount - WantedTimeoutMs - 1);
         }
 
         /// <summary>The engine answered our hello and the socket is open.</summary>
         public bool Ready => ready;
+
+        /// <summary>Tell the link its owning game is alive and still wants her — call this once a
+        /// frame (<c>LateUpdate</c>). The link only connects or reconnects while a call landed within
+        /// the last <see cref="WantedTimeoutMs"/>: see <see cref="wantedAtMs"/>.</summary>
+        public void MarkWanted() => wantedAtMs = Environment.TickCount;
+
+        bool Wanted => unchecked(Environment.TickCount - wantedAtMs) < WantedTimeoutMs;
 
         /// <summary>The current session's hello reply (null before the first).</summary>
         public HelloReply Hello => hello;
@@ -92,6 +112,13 @@ namespace Astra.Bridge
         {
             while (!stopping.WaitOne(0))
             {
+                if (!Wanted)
+                {
+                    // No heartbeat recently (switched off, or the main thread has stalled): do not
+                    // connect or reconnect, quietly — this is not a fault.
+                    stopping.WaitOne(retryMs);
+                    continue;
+                }
                 WebSocketClient socket = null;
                 try
                 {
