@@ -10,6 +10,20 @@ games (BepInEx 6), built from one code base.
 > with kernel or server-side anti-cheat (EasyAntiCheat, BattlEye, Vanguard, HoYoverse's…): mods
 > get accounts banned. Other players never see her — she is drawn only on your screen.
 
+## Supported
+
+- **Unity 2021.3 and newer** (2021.3 LTS, 2022, 6000) — the **Built-in**, **URP** and **HDRP**
+  render pipelines.
+- **Windows**, and **Linux through Proton** (see below).
+- **BepInEx 5, Mono** — the tested, supported path.
+- **BepInEx 6, IL2CPP, is experimental**: it builds and runs on the testbed, but has not yet been
+  run against a real IL2CPP game — use it and tell us what you find.
+- She works in **any** Unity game with no integration at all: the default follower keeps her near
+  the nearest object tagged `Player` (else the camera) through the game's own colliders, lit by
+  its sun. A **game integration** only REFINES who the player really is, the camera, her size and
+  raw facts for her animation set — see below.
+- macOS is not supported.
+
 ## How it works
 
 Astra's engine draws her; the game does not need to know how. The plugin:
