@@ -5,11 +5,15 @@ it is usually a small BepInEx plugin on this repository's foundation; for other 
 ReShade add-on, a MelonLoader mod, a UE4SS script or whatever that game needs.
 
 Astra installs an integration from its **GitHub repository**. The user pastes the address into
-Astra's **Games** tab, and Astra:
+Astra's **Games** tab. The work is done by the **game launcher**, a separate open-source program
+with no UI that Astra runs. The launcher:
 
 1. fetches the repository's latest release;
 2. installs it into a profile of its own;
 3. launches the game with it when the user presses **Play**.
+
+The launcher knows nothing about Astra: it fetches, extracts, places files and launches. Anything
+Astra-specific reaches it as a variable passed on its command line (see *Placeholders*).
 
 There is no catalogue yet. Integrations are shared by their address and always shown as
 **Experimental**: **Astra does not review their code.**
@@ -110,14 +114,22 @@ set = { Port = "${bridge_port}", Token = "${bridge_token}" }
 
 ### Placeholders
 
+The launcher's own placeholders:
+
 | placeholder | value |
 |---|---|
-| `${profile}` | this integration's profile folder in Astra's data folder |
+| `${profile}` | this integration's profile folder |
 | `${game}` | the game's folder (the one holding `exe`) |
+
+Every other `${name}` is a **variable** the program running the launcher passes for this launch.
+Astra passes these two:
+
+| variable | value |
+|---|---|
 | `${bridge_port}` | the port Astra's engine listens on for games |
 | `${bridge_token}` | the token of this session (empty when the engine asks for none) |
 
-An unknown placeholder is refused.
+A placeholder that is neither the launcher's own nor passed by the caller is refused.
 
 ### Rules
 
