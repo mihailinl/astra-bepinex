@@ -54,6 +54,7 @@ namespace Astra.Unity
         readonly FrameContext frame = new FrameContext(new Her(), new ParamSet(), new Cues());
         readonly FollowBrain follow = new FollowBrain();
         readonly DefaultPlayer defaultPlayer = new DefaultPlayer();
+        readonly DefaultCamera defaultCamera = new DefaultCamera();
         GameIntegration integration;
         GameIntegration dropped; // an integration that faulted: not taken up again until it re-registers
         Vector3 lastPosition, velocity;
@@ -68,7 +69,8 @@ namespace Astra.Unity
         static readonly string KeepAlive = Messages.Param(new ParamSet()); // an empty set: changes nothing
 
         Camera main;
-        float nextCameraSearch;
+        string lastPick; // the bare foundation's own camera+player choice, logged only when it changes
+        bool playerDefaulted; // this frame's player came from DefaultPlayer, not an integration's own locator
         KeyCode toggle = KeyCode.None;
         int mask = Physics.DefaultRaycastLayers;
         string maskLayers;
@@ -187,18 +189,26 @@ namespace Astra.Unity
                     lastSent = Time.unscaledTime;
                 }
                 var pick = integration?.CameraLocator;
-                if (pick != null)
-                {
-                    main = Guarded("camera", pick, () => Camera.main);
-                }
-                else if (Time.unscaledTime > nextCameraSearch || main == null || !main.isActiveAndEnabled)
-                {
-                    main = Camera.main;
-                    nextCameraSearch = Time.unscaledTime + 1f;
-                }
+                bool cameraDefaulted = pick == null;
+                main = cameraDefaulted ? defaultCamera.Locate() : Guarded("camera", pick, () => defaultCamera.Locate());
                 // Skip her placement and follow logic while there is no picture to draw her into
                 // anyway (M6): the engine disconnected, or the ring is not open yet.
-                if (main != null && live) RunFrame(main);
+                if (main != null && live)
+                {
+                    RunFrame(main);
+                    // The bare foundation's own camera/player choice, for whichever of the two has
+                    // no integration in charge of it: one line when either changes, so a tester's
+                    // log shows what "any Unity game" picked with no per-game code at all.
+                    string picked = cameraDefaulted ? $"camera {defaultCamera.Description}" : null;
+                    if (playerDefaulted)
+                        picked = picked == null ? $"player {defaultPlayer.Description}" : picked + $", player {defaultPlayer.Description}";
+                    if (picked != null && picked != lastPick)
+                    {
+                        lastPick = picked;
+                        log.LogInfo("picked " + picked);
+                    }
+                    else if (picked == null) lastPick = null;
+                }
             });
         }
 
@@ -278,7 +288,9 @@ namespace Astra.Unity
 
             // The player the config names wins over the integration's; the default last.
             string configured = settings.PlayerObject.Value;
-            frame.Player = string.IsNullOrEmpty(configured) && integration?.PlayerLocator != null
+            bool usesIntegrationPlayer = string.IsNullOrEmpty(configured) && integration?.PlayerLocator != null;
+            playerDefaulted = !usesIntegrationPlayer;
+            frame.Player = usesIntegrationPlayer
                 ? Guarded("player", () => Checked(integration.PlayerLocator(cam)), () => defaultPlayer.Locate(cam, configured, mask))
                 : defaultPlayer.Locate(cam, configured, mask);
             IgnorePlayer(frame.Player?.Root);

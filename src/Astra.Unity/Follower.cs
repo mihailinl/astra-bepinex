@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+using System.Collections.Generic;
+using Astra.Bridge;
 using Astra.Sdk;
 using UnityEngine;
 
@@ -178,7 +180,9 @@ namespace Astra.Unity
             vel.x = vel.z = 0;
         }
 
-        static Vector3 Horizontal(Vector3 v)
+        /// <summary>Shared with <see cref="DefaultPlayer"/>: an object's forward, flattened (zero
+        /// when it points straight up/down — the caller falls back to the camera's).</summary>
+        internal static Vector3 Horizontal(Vector3 v)
         {
             v.y = 0;
             return v.sqrMagnitude > 1e-6f ? v.normalized : Vector3.zero;
@@ -186,16 +190,28 @@ namespace Astra.Unity
     }
 
     /// <summary>
-    /// The stock player LOCATOR: the object the player named in the config, else the object tagged
-    /// <c>Player</c> nearest the camera (in a multiplayer game, that is YOU), else the ground under
-    /// the camera (a first-person game with no tagged player).
+    /// The stock player LOCATOR, in rungs: the object the player named in the config; else the
+    /// object tagged <c>Player</c> nearest the camera (in a multiplayer game, that is YOU); else a
+    /// cheap SCORE over the scene — the camera's own ancestors (a first-person rig: the camera
+    /// rides the player) first, then the nearest <see cref="CharacterController"/> or humanoid
+    /// <see cref="Animator"/> within reach, preferring one in front of the camera; else the ground
+    /// under the camera. Re-scored every ~2 s, never a per-frame scene scan.
     /// </summary>
     sealed class DefaultPlayer
     {
+        /// <summary>How far a scored candidate (never the <c>Player</c> tag, which has its own
+        /// range) may be from the camera.</summary>
+        const float ScoreRange = 15f;
+
         GameObject player;
+        CharacterController controller;
+        Collider collider;
         string searchedFor;
         float nextSearch;
-        static readonly System.Collections.Generic.HashSet<int> NoIgnore = new System.Collections.Generic.HashSet<int>();
+        static readonly HashSet<int> NoIgnore = new HashSet<int>();
+
+        /// <summary>The last pick, for the one-line log when it changes (Driver owns the logging).</summary>
+        public string Description = "the ground under the camera";
 
         public PlayerInfo? Locate(Camera cam, string configured, int mask)
         {
@@ -203,18 +219,57 @@ namespace Astra.Unity
             {
                 nextSearch = Time.unscaledTime + 2f;
                 searchedFor = configured;
-                player = Find(cam, configured);
+                var found = Find(cam, configured, out string why);
+                if (found != player)
+                {
+                    player = found;
+                    controller = found != null ? found.GetComponent<CharacterController>() : null;
+                    collider = found != null && controller == null ? found.GetComponent<Collider>() : null;
+                    Description = found != null ? $"'{found.name}' ({why})" : "the ground under the camera";
+                }
             }
-            if (player != null)
-                return new PlayerInfo { Feet = player.transform.position, Root = player, Grounded = true };
+            if (player != null) return BuildInfo(player, controller, collider);
             var eye = cam.transform.position;
             var feet = Compat.Raycast(eye, Vector3.down, 3f, mask, NoIgnore, out var ground) ? ground.point : eye + Vector3.down * 1.6f;
             return new PlayerInfo { Feet = feet, Grounded = true };
         }
 
-        static GameObject Find(Camera cam, string configured)
+        /// <summary>Feet/Forward/Grounded/Height from whichever of a <see cref="CharacterController"/>
+        /// or a plain <see cref="Collider"/> the chosen object carries (neither: its transform
+        /// position, an unknown height, and standing).</summary>
+        static PlayerInfo BuildInfo(GameObject go, CharacterController cc, Collider col)
         {
-            if (!string.IsNullOrEmpty(configured)) return GameObject.Find(configured);
+            Vector3 feet = cc != null ? BoundsFeet(cc.bounds) : col != null ? BoundsFeet(col.bounds) : go.transform.position;
+            float height = cc != null ? cc.height * cc.transform.lossyScale.y : col != null ? col.bounds.size.y : 0f;
+            return new PlayerInfo
+            {
+                Feet = feet,
+                Forward = FollowBrain.Horizontal(go.transform.forward),
+                Root = go, // the candidate's OWN hierarchy, never the scene root
+                Grounded = cc == null || cc.isGrounded,
+                Height = height,
+            };
+        }
+
+        static Vector3 BoundsFeet(Bounds b) => new Vector3(b.center.x, b.min.y, b.center.z);
+
+        static GameObject Find(Camera cam, string configured, out string why)
+        {
+            if (!string.IsNullOrEmpty(configured)) { why = "configured"; return GameObject.Find(configured); }
+            var tagged = TaggedPlayer(cam);
+            if (tagged != null) { why = "tagged Player"; return tagged; }
+            var ancestor = AncestorPlayer(cam, out why);
+            if (ancestor != null) return ancestor;
+            var cc = NearestController(cam, ScoreRange);
+            if (cc != null) { why = "nearest CharacterController"; return cc; }
+            var humanoid = NearestHumanoid(cam, ScoreRange);
+            if (humanoid != null) { why = "nearest humanoid Animator ahead of the camera"; return humanoid; }
+            why = null;
+            return null;
+        }
+
+        static GameObject TaggedPlayer(Camera cam)
+        {
             GameObject found = null;
             float best = 15f;
             foreach (var g in Compat.WithTag("Player"))
@@ -228,6 +283,161 @@ namespace Astra.Unity
                 }
             }
             return found;
+        }
+
+        /// <summary>First person: the camera itself rides the player. Walk UP from the camera (never
+        /// down into the whole scene) for the nearest ancestor with a <see cref="CharacterController"/>,
+        /// a <see cref="Rigidbody"/>+<see cref="Collider"/>, or a humanoid <see cref="Animator"/>.</summary>
+        static GameObject AncestorPlayer(Camera cam, out string why)
+        {
+            for (var t = cam.transform.parent; t != null; t = t.parent)
+            {
+                var go = t.gameObject;
+                if (go.GetComponent<CharacterController>() != null)
+                {
+                    why = "the camera's ancestor has a CharacterController";
+                    return go;
+                }
+                if (go.GetComponent<Rigidbody>() != null && go.GetComponent<Collider>() != null)
+                {
+                    why = "the camera's ancestor has a Rigidbody + Collider";
+                    return go;
+                }
+                var anim = go.GetComponent<Animator>();
+                if (anim != null && anim.isHuman)
+                {
+                    why = "the camera's ancestor has a humanoid Animator";
+                    return go;
+                }
+            }
+            why = null;
+            return null;
+        }
+
+        /// <summary>Third person: every <see cref="CharacterController"/> within <paramref name="maxDist"/>
+        /// of the camera, preferring one AHEAD of it, then the nearest. Scanned only when this
+        /// locator re-searches (every ~2 s), never per frame.</summary>
+        static GameObject NearestController(Camera cam, float maxDist)
+        {
+            GameObject found = null;
+            float bestScore = float.MaxValue;
+            var pos = cam.transform.position;
+            var fwd = cam.transform.forward;
+            foreach (var cc in Compat.FindAll<CharacterController>())
+            {
+                if (cc == null || !cc.enabled || !cc.gameObject.activeInHierarchy) continue;
+                var to = cc.transform.position - pos;
+                float dist = to.magnitude;
+                if (dist > maxDist) continue;
+                float score = (float)LocatorScoring.CandidateScore(dist, Vector3.Dot(fwd, to) > 0, maxDist);
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    found = cc.gameObject;
+                }
+            }
+            return found;
+        }
+
+        /// <summary>No <see cref="CharacterController"/> anywhere (root-motion humanoids): the
+        /// nearest humanoid <see cref="Animator"/> ahead of the camera within <paramref name="maxDist"/>.</summary>
+        static GameObject NearestHumanoid(Camera cam, float maxDist)
+        {
+            GameObject found = null;
+            float bestDist = float.MaxValue;
+            var pos = cam.transform.position;
+            var fwd = cam.transform.forward;
+            foreach (var anim in Compat.FindAll<Animator>())
+            {
+                if (anim == null || !anim.enabled || !anim.isHuman || !anim.gameObject.activeInHierarchy) continue;
+                var to = anim.transform.position - pos;
+                if (Vector3.Dot(fwd, to) <= 0) continue;
+                float dist = to.magnitude;
+                if (dist > maxDist || dist >= bestDist) continue;
+                bestDist = dist;
+                found = anim.gameObject;
+            }
+            return found;
+        }
+    }
+
+    /// <summary>
+    /// The stock CAMERA locator, when no integration names one: <c>Camera.main</c> while it
+    /// renders to the screen; else the enabled camera with no render-texture target and the
+    /// highest depth — ties broken by whichever moved most recently (an idle security camera loses
+    /// to the one the player is steering), then by the larger viewport. Re-scored every ~2 s and
+    /// kept while it still renders to the screen, so a momentary <c>Camera.main</c> hiccup never
+    /// flickers her view.
+    /// </summary>
+    sealed class DefaultCamera
+    {
+        struct Seen { public Vector3 Pos; public Quaternion Rot; public float Since; }
+
+        Camera current;
+        float nextSearch;
+        readonly Dictionary<int, Seen> moved = new Dictionary<int, Seen>();
+
+        /// <summary>The last pick, for the one-line log when it changes (Driver owns the logging).</summary>
+        public string Description = "none";
+
+        public Camera Locate()
+        {
+            if (ToScreen(current) && Time.unscaledTime < nextSearch) return current;
+            nextSearch = Time.unscaledTime + 2f;
+            Camera found;
+            string why;
+            var tagged = Camera.main;
+            if (ToScreen(tagged)) { found = tagged; why = "Camera.main"; }
+            else { found = Best(); why = "highest-depth camera with no render target"; }
+            if (found != current)
+            {
+                current = found;
+                Description = found != null ? $"'{found.name}' ({why})" : "none";
+            }
+            return current;
+        }
+
+        static bool ToScreen(Camera c) => c != null && c.isActiveAndEnabled && c.targetTexture == null;
+
+        Camera Best()
+        {
+            Camera found = null;
+            float bestDepth = 0, bestSince = 0, bestArea = 0;
+            float now = Time.unscaledTime;
+            foreach (var c in Camera.allCameras)
+            {
+                if (!ToScreen(c)) continue;
+                float since = Track(c, now);
+                var r = c.pixelRect;
+                float area = r.width * r.height;
+                if (found != null && !LocatorScoring.BetterCamera(c.depth, since, area, bestDepth, bestSince, bestArea))
+                    continue;
+                found = c;
+                bestDepth = c.depth;
+                bestSince = since;
+                bestArea = area;
+            }
+            return found;
+        }
+
+        /// <summary>When <paramref name="c"/> last moved (now, the first time it is seen, so a
+        /// brand-new camera is not starved behind idle ones).</summary>
+        float Track(Camera c, float now)
+        {
+            int id = c.GetInstanceID();
+            var t = c.transform;
+            if (moved.TryGetValue(id, out var prev))
+            {
+                if (prev.Pos != t.position || prev.Rot != t.rotation)
+                {
+                    moved[id] = new Seen { Pos = t.position, Rot = t.rotation, Since = now };
+                    return now;
+                }
+                return prev.Since;
+            }
+            if (moved.Count > 64) moved.Clear(); // a scene churning through cameras: forget and restart
+            moved[id] = new Seen { Pos = t.position, Rot = t.rotation, Since = now };
+            return now;
         }
     }
 }
