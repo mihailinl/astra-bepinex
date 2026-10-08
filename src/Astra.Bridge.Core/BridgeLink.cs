@@ -19,6 +19,16 @@ namespace Astra.Bridge
     {
         public const int DefaultPort = 25600;
 
+        /// <summary>Said by the engine when a refused hello is some OTHER connection already holding
+        /// the claim (<c>ws.rs::take_claim</c>) — never a wording a foundation should guess at, so this
+        /// is the engine's own text, verbatim.</summary>
+        const string AnotherGameHoldsHer = "another game already holds Astra";
+
+        /// <summary>How long to wait before trying again after <see cref="AnotherGameHoldsHer"/>: that
+        /// refusal will not change until the OTHER game leaves, so retrying every <c>retryMs</c> (as
+        /// short as 250 ms) only spams the engine's log for no chance of a different answer.</summary>
+        const int AnotherGameRetryMs = 10000;
+
         readonly string client;
         readonly string host;
         readonly int port;
@@ -56,7 +66,9 @@ namespace Astra.Bridge
         public BridgeLink(string client, int port = DefaultPort, string token = null, int retryMs = 2000, string host = "127.0.0.1")
         {
             this.client = client;
-            this.port = port;
+            // Whatever a config file holds (L3): a value outside TCP's range must never reach a
+            // socket call.
+            this.port = Math.Max(1, Math.Min(65535, port));
             this.token = token;
             this.retryMs = Math.Max(250, retryMs);
             this.host = host;
@@ -66,6 +78,9 @@ namespace Astra.Bridge
 
         /// <summary>The engine answered our hello and the socket is open.</summary>
         public bool Ready => ready;
+
+        /// <summary>The (clamped) port this link connects to.</summary>
+        public int Port => port;
 
         /// <summary>Tell the link its owning game is alive and still wants her — call this once a
         /// frame (<c>LateUpdate</c>). The link only connects or reconnects while a call landed within
@@ -148,11 +163,13 @@ namespace Astra.Bridge
                     continue;
                 }
                 WebSocketClient socket = null;
+                int wait = retryMs;
                 try
                 {
                     socket = WebSocketClient.Connect(host, port, "/", 2000);
                     ws = socket;
                     loggedErrors.Clear(); // a new connection: an engine error is worth saying again
+                    LastError = null;
                     if (!socket.SendText(Messages.Hello(client, token, EffectiveShadow(), Game, Foundation, Integration)))
                         throw new IOException("closed before hello");
                     State($"connected to Astra on {host}:{port}");
@@ -163,11 +180,21 @@ namespace Astra.Bridge
                         Handle(text);
                     }
                     State("Astra closed the connection" + (LastError != null ? $" ({LastError})" : ""));
+                    // That refusal will not change until the other game lets go: retrying every
+                    // retryMs (as fast as 250 ms) only spams Astra's log for nothing.
+                    if (LastError == AnotherGameHoldsHer) wait = AnotherGameRetryMs;
                 }
                 catch (IOException e)
                 {
                     LastError = e.Message;
                     State($"Astra is not reachable on {host}:{port} ({e.Message}); retrying");
+                }
+                catch (Exception e)
+                {
+                    // Nothing may escape this thread (L3): an uncaught exception here crashes an
+                    // IL2CPP game outright, for a link that is meant to fail soft and retry.
+                    LastError = e.Message;
+                    State($"the link to Astra faulted ({e.GetType().Name}: {e.Message}); retrying");
                 }
                 finally
                 {
@@ -175,7 +202,7 @@ namespace Astra.Bridge
                     ws = null;
                     socket?.Dispose();
                 }
-                stopping.WaitOne(retryMs);
+                stopping.WaitOne(wait);
             }
         }
 
