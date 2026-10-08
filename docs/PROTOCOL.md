@@ -80,7 +80,7 @@ is refused (browsers are not allowed in); native clients do not send one.
  "ambientCube":[r,g,b, r,g,b, r,g,b, r,g,b, r,g,b, r,g,b],
  "lamps":[{"pos":[x,y,z],"range":8,"color":[r,g,b],"intensity":12.5,"spot":{"dir":[x,y,z],"cos":[0.9,0.97]},"held":false}],
  "ambientSrc":"global","open":0.4,"suns":[{"dir":[x,y,z],"color":[r,g,b],"intensity":0.3,"visible":1.0}],
- "look":{"floor":0.2,"ceiling":1.4}}
+ "look":{"floor":0.2,"ceiling":1.4},"fog":{"color":[r,g,b],"mode":"exp","density":0.1}}
 ```
 
 - **`hello`'s `shadow`** (optional) — which of her two shadows you read, because each costs the engine
@@ -205,6 +205,15 @@ is refused (browsers are not allowed in); native clients do not send one.
   - **`look`** (optional) — your game's taste for her band: `floor` 0.05..0.40 (the dimmest she gets,
     default 0.20) and `ceiling` 0.8..2.0 (the brightest she approaches, default 1.40), as multiples
     of her albedo. Absent = the engine's. Set it only where a live look at your game asks for it.
+  - **`fog`** (optional) — the haze YOUR picture composites AFTER hers, which hers never sees
+    otherwise (a crisp cut-out in grey haze): `{"color":[r,g,b], "mode":"exp"|"exp2"|"linear",
+    "density", "start", "end"}`. `color` is LINEAR RGB, 0..16 (what the fog itself looks like — put
+    on her scale the same way her light is, so a dark fog does not make her a black hole and a
+    bright one does not blow her out). `mode` picks which of `density` (`"exp"`/`"exp2"`, per metre)
+    or `start`/`end` (`"linear"`, metres, `end` > `start` ≥ 0) it reads; an unknown mode is refused.
+    Absent = no fog. A `fog` alone is still a `light` message (it lights her with nothing new, hazes
+    her with something), never a message that is `is_whole`'s kind of whole. `WGPU_WORLD_FOG=off`
+    turns it off for a live A/B.
 - **When your game lets go of her** — it closes, crashes, or sends nothing for 10 s — every
   parameter it set returns to its default, if it cued her graph she returns to its default state,
   and if it lit her she gets her own light back. The next game finds her standing.

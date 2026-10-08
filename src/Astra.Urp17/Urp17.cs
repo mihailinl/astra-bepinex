@@ -35,6 +35,24 @@ namespace Astra.Unity
             return settings == null || !settings.enableRenderCompatibilityMode;
         }
 
+        /// <summary>
+        /// URP's post-exposure multiplier (<c>2^postExposure</c>) from the active volume stack's
+        /// <c>ColorAdjustments</c> override — URP applies it to the WHOLE picture after grading, so a
+        /// light fact read before that stage (the sun, the ambient cube, a lamp, the fog colour) must
+        /// be scaled by it too, or she (and her fog) read dim against a game that pushed exposure up
+        /// in its post volume. Null when no such override is active (1 = no change): a scene with no
+        /// volume, or one whose <c>postExposure.overrideState</c> is off. Called by reflection
+        /// (<c>UrpHook</c>), read once per light message.
+        /// </summary>
+        static float? PostExposure()
+        {
+            var stack = VolumeManager.instance.stack;
+            var ca = stack?.GetComponent<ColorAdjustments>();
+            if (ca == null || !ca.active || !ca.postExposure.overrideState) return null;
+            float v = ca.postExposure.value;
+            return !float.IsNaN(v) && !float.IsInfinity(v) ? Mathf.Pow(2f, v) : (float?)null;
+        }
+
         /// <summary>Queue her pass on <paramref name="cam"/>'s renderer for this frame. False when
         /// this camera has no URP renderer (the caller then composites the old way). Called by
         /// reflection (<c>UrpHook</c>).</summary>

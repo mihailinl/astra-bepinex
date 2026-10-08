@@ -72,6 +72,18 @@ namespace Astra.Unity
         /// probe); null = use <c>RenderSettings.ambientProbe</c>.</summary>
         public Func<SphericalHarmonicsL2?> PipelineAmbient { get; set; }
 
+        /// <summary>HDRP's own Fog volume (<see cref="Physical"/> only — Built-in/URP read
+        /// <c>RenderSettings.fog</c> directly); null = no adapter. <c>enabled</c> false = no active
+        /// fog override.</summary>
+        public Func<(bool enabled, float density, Color color)> PipelineFog { get; set; }
+
+        /// <summary>URP's <c>2^postExposure</c> multiplier from an active ColorAdjustments override
+        /// (1 = no change, every pipeline but URP 17): every light VALUE this feed sends — sun/extra
+        /// sun intensities, the ambient scalar and cube, a lamp's intensity, the fog colour — is
+        /// scaled by it, because URP applies it to the whole picture after grading, downstream of
+        /// every one of these readings.</summary>
+        public float PostExposure { get; set; } = 1f;
+
         /// <summary>What she was lit with last, for the log: one line a player can paste.</summary>
         public string Summary { get; private set; }
 
@@ -144,6 +156,7 @@ namespace Astra.Unity
             double? open = ambientSrc != "local" ? (double?)Open(chest, ignore) : null;
 
             Lamps(chest, ignore, camera, playerRoot);
+            Fog? fog = BuildFog();
 
             // The cube's mean as the one ambient colour too: an engine from before the cube reads that.
             double r = 0, g = 0, b = 0;
@@ -153,7 +166,7 @@ namespace Astra.Unity
                 g += f.Y / 6;
                 b += f.Z / 6;
             }
-            string json = Messages.Light(s, new Vec3(Fine(r), Fine(g), Fine(b)), cube, lamps, ambientSrc, open, suns, look);
+            string json = Messages.Light(s, new Vec3(Fine(r), Fine(g), Fine(b)), cube, lamps, ambientSrc, open, suns, look, fog);
             int held = 0;
             foreach (var l in lamps) if (l.Held) held++;
             Summary = $"sun {(s.HasValue ? $"{s.Value.Intensity:0.##} × visible {s.Value.Visible:0.##}" : "none")}" +
@@ -163,7 +176,10 @@ namespace Astra.Unity
                       $", {lamps.Count} lamp(s) of {candidates.Count}" +
                       (held > 0 ? $" ({held} held)" : "") +
                       (look.HasValue ? $", look {look.Value.Floor:0.##}..{look.Value.Ceiling:0.##}" : "") +
-                      (Physical ? $", exposure {Exposure:0.######}" : "");
+                      (fog.HasValue ? $", fog {fog.Value.Mode} " +
+                          (fog.Value.Mode == "linear" ? $"{fog.Value.Start:0.#}..{fog.Value.End:0.#}m" : $"density {fog.Value.Density:0.###}") : "") +
+                      (Physical ? $", exposure {Exposure:0.######}" : "") +
+                      (PostExposure != 1f ? $", post-exposure ×{PostExposure:0.###}" : "");
             if (json == null || json == last) return null;
             last = json;
             return json;
@@ -181,8 +197,50 @@ namespace Astra.Unity
         }
 
         /// <summary>What turns one of this pipeline's DIRECT light intensities into the picture's
-        /// scale: HDRP's lux and candela times the exposure, over its Lambert's π; 1 elsewhere.</summary>
-        float DirectScale => Physical ? Exposure / Mathf.PI : 1f;
+        /// scale: HDRP's lux and candela times the exposure, over its Lambert's π; 1 elsewhere — and,
+        /// on top of either, URP's post-exposure (<see cref="PostExposure"/>), which URP applies
+        /// after every one of these readings.</summary>
+        float DirectScale => (Physical ? Exposure / Mathf.PI : 1f) * PostExposure;
+
+        /// <summary>The haze her picture, composited after the game's own post-processing, never
+        /// sees. Built-in/URP: <c>RenderSettings.fog</c> verbatim (colour, mode, density/extent).
+        /// HDRP (<see cref="Physical"/>): its own Fog volume through <see cref="PipelineFog"/>,
+        /// already lit and exposed. Every colour takes <see cref="PostExposure"/> like every other
+        /// light value. Null when there is no fog, or a misconfigured scene's numbers would not pass
+        /// the engine's bounds (end &lt;= start, a non-positive density) — dropping only the fog,
+        /// never the rest of the message.</summary>
+        Fog? BuildFog()
+        {
+            if (Physical)
+            {
+                // Named explicitly: a bare `var` here would merge the ternary's branches into an
+                // UNNAMED tuple type (the literal fallback carries no names), and `.enabled` below
+                // would not compile.
+                (bool enabled, float density, Color color) f = PipelineFog != null ? PipelineFog() : default;
+                if (!f.enabled || !(f.density > 0)) return null;
+                return new Fog
+                {
+                    Color = new Vec3(Fine(f.color.r * PostExposure), Fine(f.color.g * PostExposure), Fine(f.color.b * PostExposure)),
+                    Mode = "exp",
+                    Density = Quantise(f.density),
+                };
+            }
+            if (!RenderSettings.fog) return null;
+            Color c = RenderSettings.fogColor.linear;
+            var color = new Vec3(Fine(c.r * PostExposure), Fine(c.g * PostExposure), Fine(c.b * PostExposure));
+            switch (RenderSettings.fogMode)
+            {
+                case UnityEngine.FogMode.Linear:
+                    double start = RenderSettings.fogStartDistance, end = RenderSettings.fogEndDistance;
+                    return end > start && start >= 0
+                        ? new Fog { Color = color, Mode = "linear", Start = Quantise(start), End = Quantise(end) }
+                        : (Fog?)null;
+                case UnityEngine.FogMode.ExponentialSquared:
+                    return RenderSettings.fogDensity > 0 ? new Fog { Color = color, Mode = "exp2", Density = Quantise(RenderSettings.fogDensity) } : (Fog?)null;
+                default: // Exponential
+                    return RenderSettings.fogDensity > 0 ? new Fog { Color = color, Mode = "exp", Density = Quantise(RenderSettings.fogDensity) } : (Fog?)null;
+            }
+        }
 
         /// <summary>The sun struct for one directional light (the primary or an extra): its colour
         /// times HDRP's per-light dimmer (<see cref="Compat.LightDimmer"/>), normalised, and how much
@@ -302,7 +360,7 @@ namespace Astra.Unity
                 }
             }
             var c = Compat.EvaluateSh(sh, probeDirections);
-            float scale = Physical ? Exposure : 1f;
+            float scale = (Physical ? Exposure : 1f) * PostExposure;
             Vec3 Face(int i) => new Vec3(Fine(Mathf.Max(0, c[i].r) * scale), Fine(Mathf.Max(0, c[i].g) * scale), Fine(Mathf.Max(0, c[i].b) * scale));
             cube[0] = Face(0);
             cube[1] = Face(1);

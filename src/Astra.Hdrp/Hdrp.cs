@@ -134,6 +134,44 @@ namespace Astra.Unity
             return ambientProbe?.Invoke(sky, new object[] { HDCamera.GetOrCreate(cam) }) is SphericalHarmonicsL2 sh ? sh : default;
         }
 
+        /// <summary>
+        /// HDRP's FOG VOLUME — the density + colour her picture, composited after HDRP's own fog,
+        /// never sees. <c>density = 1/meanFreePath</c> (HDRP's own unit: the distance at which 63% of
+        /// the light behind a surface is lost); the colour is the fog's authored albedo, tinted by
+        /// the sky's ambient (the light the fog itself scatters INTO the view, same as a real haze
+        /// picks up the sky's colour) and brought to the picture's scale by the camera's exposure — the
+        /// same two numbers <see cref="Ambient"/> and <see cref="Exposure"/> already read, so this adds
+        /// no new readback. <c>(false, …)</c> when there is no active Fog override. Called by
+        /// reflection.
+        /// </summary>
+        static (bool enabled, float density, Color color) ReadFog(Camera cam)
+        {
+            var stack = VolumeManager.instance?.stack;
+            var fog = stack?.GetComponent<UnityEngine.Rendering.HighDefinition.Fog>();
+            if (fog == null || !fog.active || !fog.enabled.value) return (false, 0f, Color.black);
+            float meanFreePath = Mathf.Max(fog.meanFreePath.value, 0.01f);
+            float density = 1f / meanFreePath;
+            Color albedo = fog.albedo.value;
+            var sh = Ambient(cam);
+            float ambientMean = MeanLuma(sh);
+            float exposure = Exposure(cam);
+            float scale = (exposure > 0 ? exposure : 1f) * ambientMean;
+            Color color = new Color(albedo.r * scale, albedo.g * scale, albedo.b * scale, 1f);
+            return (true, density, color);
+        }
+
+        /// <summary>The mean luminance of a spherical-harmonics probe's DC term (band 0) — the
+        /// ambient's overall level, used to tint HDRP's fog with the sky it scatters.</summary>
+        static float MeanLuma(SphericalHarmonicsL2 sh)
+        {
+            // Band 0 (l=0) is a constant term per channel: sh[c, 0] * k0 is that channel's share of a
+            // uniform ambient (Ramamoorthi & Hanrahan); k0 = 1/(2*sqrt(PI)) for the normalisation
+            // Unity's SphericalHarmonicsL2 uses.
+            const float k0 = 0.282095f;
+            float r = Mathf.Max(0, sh[0, 0] * k0), g = Mathf.Max(0, sh[1, 0] * k0), b = Mathf.Max(0, sh[2, 0] * k0);
+            return 0.2126f * r + 0.7152f * g + 0.0722f * b;
+        }
+
         sealed class AstraPass : CustomPass
         {
             public Compositor Compositor;

@@ -41,6 +41,7 @@ namespace Astra.Unity
     static class UrpHook
     {
         static Func<Camera, Compositor, bool> enqueue;
+        static Func<float?> postExposure;
 
         /// <summary>Why there is no adapter (null when there is one).</summary>
         public static string Missing { get; private set; } = "not looked for";
@@ -53,6 +54,7 @@ namespace Astra.Unity
         public static void TryLoad()
         {
             enqueue = null;
+            postExposure = null;
             if (Adapters.PipelineName != "UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset")
             {
                 Missing = "not a URP game";
@@ -68,6 +70,8 @@ namespace Astra.Unity
                 RenderGraph = Adapters.Method<Func<bool>>("Astra.Urp17", "Astra.Unity.Urp17", "RenderGraphOn")();
                 enqueue = Adapters.Method<Func<Camera, Compositor, bool>>("Astra.Urp17", "Astra.Unity.Urp17", "Enqueue");
                 Missing = null;
+                try { postExposure = Adapters.Method<Func<float?>>("Astra.Urp17", "Astra.Unity.Urp17", "PostExposure"); }
+                catch (Exception) { postExposure = null; } // an older adapter: light values unconverted
             }
             catch (Exception e)
             {
@@ -90,6 +94,23 @@ namespace Astra.Unity
                 return false;
             }
         }
+
+        /// <summary>URP's <c>2^postExposure</c> multiplier from its active ColorAdjustments volume
+        /// override; 1 (no change) when there is none or the adapter cannot read it.</summary>
+        public static float PostExposure()
+        {
+            if (postExposure == null) return 1f;
+            try
+            {
+                float? v = postExposure();
+                return v is float f && f > 0 && !float.IsInfinity(f) && !float.IsNaN(f) ? f : 1f;
+            }
+            catch (Exception)
+            {
+                postExposure = null;
+                return 1f;
+            }
+        }
     }
 
     /// <summary>
@@ -102,6 +123,7 @@ namespace Astra.Unity
         static Func<Camera, Compositor, bool> attach;
         static Func<Camera, float> exposure;
         static Func<Camera, SphericalHarmonicsL2> ambient;
+        static Func<Camera, (bool enabled, float density, Color color)> fog;
         static Camera attachedTo;
 
         public static string Missing { get; private set; } = "not looked for";
@@ -125,6 +147,8 @@ namespace Astra.Unity
                 catch (Exception) { exposure = null; } // an older adapter: lights unconverted
                 try { ambient = Adapters.Method<Func<Camera, SphericalHarmonicsL2>>("Astra.Hdrp", "Astra.Unity.Hdrp", "Ambient"); }
                 catch (Exception) { ambient = null; }
+                try { fog = Adapters.Method<Func<Camera, (bool, float, Color)>>("Astra.Hdrp", "Astra.Unity.Hdrp", "ReadFog"); }
+                catch (Exception) { fog = null; } // an older adapter: no HDRP fog
             }
             catch (Exception e)
             {
@@ -165,6 +189,24 @@ namespace Astra.Unity
             {
                 ambient = null;
                 return null;
+            }
+        }
+
+        /// <summary>HDRP's active Fog volume for <paramref name="cam"/> — density + the lit haze
+        /// colour, already on the picture's scale; <c>enabled</c> false when there is none or the
+        /// adapter cannot read it.</summary>
+        public static (bool enabled, float density, Color color) Fog(Camera cam)
+        {
+            if (fog == null) return (false, 0f, Color.black);
+            try
+            {
+                var f = fog(cam);
+                return f.enabled && f.density > 0 && !float.IsInfinity(f.density) && !float.IsNaN(f.density) ? f : (false, 0f, Color.black);
+            }
+            catch (Exception)
+            {
+                fog = null;
+                return (false, 0f, Color.black);
             }
         }
 

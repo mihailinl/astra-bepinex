@@ -139,6 +139,21 @@ namespace Astra.Bridge
         public double Floor, Ceiling;
     }
 
+    /// <summary>The haze her picture — composited AFTER the game's own post-processing — never
+    /// sees otherwise (a crisp cut-out in grey haze), for <c>light</c>'s <c>fog</c>.</summary>
+    public struct Fog
+    {
+        /// <summary>Linear RGB, what the haze itself looks like — the same 0..16 scale as every
+        /// other light colour.</summary>
+        public Vec3 Color;
+        /// <summary><c>"exp"</c>, <c>"exp2"</c> or <c>"linear"</c>.</summary>
+        public string Mode;
+        /// <summary>Per-metre falloff; read for <c>"exp"</c>/<c>"exp2"</c> only.</summary>
+        public double Density;
+        /// <summary>Metres; read for <c>"linear"</c> only (<c>End &gt; Start &gt;= 0</c>).</summary>
+        public double Start, End;
+    }
+
     /// <summary>Where she stands, for <c>avatar</c>.</summary>
     public struct Placement
     {
@@ -302,7 +317,27 @@ namespace Astra.Bridge
         /// strongest first, each validated and clamped the same way; null or empty = none.</param>
         /// <param name="look">Where her gaze should keep to, vertically; null = not said (builder
         /// support only — nothing sends this yet).</param>
-        public static string Light(Sun? sun, Vec3? ambient, Vec3[] cube, IList<Lamp> lamps, string ambientSrc, double? open, IList<Sun> suns, Look? look)
+        public static string Light(Sun? sun, Vec3? ambient, Vec3[] cube, IList<Lamp> lamps, string ambientSrc, double? open, IList<Sun> suns, Look? look) =>
+            Light(sun, ambient, cube, lamps, ambientSrc, open, suns, look, null);
+
+        /// <param name="sun">The key light; null = hers.</param>
+        /// <param name="ambient">One ambient colour; null = hers (or the cube's, for an engine that knows it).</param>
+        /// <param name="cube">The ambient on a surface facing +X, −X, +Y, −Y, +Z, −Z (the bridge's axes):
+        /// six colours, or null.</param>
+        /// <param name="lamps">At most eight point and spot lights, strongest first; null or empty = none.</param>
+        /// <param name="ambientSrc">Where <paramref name="cube"/> came from: <c>"local"</c> (light
+        /// probes at her own point — what the game's own characters get there), <c>"global"</c> (one
+        /// scene-wide value), <c>"none"</c> (a physical pipeline, HDRP, with neither — the cube is all
+        /// zero); null = not said.</param>
+        /// <param name="open">0..1: the share of the sky above her that is open (no shadow caster
+        /// within 60 units), for an engine filling in its own sky estimate when
+        /// <paramref name="ambientSrc"/> is not local; null = not said.</param>
+        /// <param name="suns">Up to three EXTRA realtime directional lights besides <paramref name="sun"/>,
+        /// strongest first, each validated and clamped the same way; null or empty = none.</param>
+        /// <param name="look">Where her gaze should keep to, vertically; null = not said (builder
+        /// support only — nothing sends this yet).</param>
+        /// <param name="fog">The haze her picture never sees; null = none.</param>
+        public static string Light(Sun? sun, Vec3? ambient, Vec3[] cube, IList<Lamp> lamps, string ambientSrc, double? open, IList<Sun> suns, Look? look, Fog? fog)
         {
             var w = Begin("light");
             if (sun.HasValue)
@@ -385,6 +420,27 @@ namespace Astra.Bridge
                 if (!Vec3.Finite(lk.Floor) || !Vec3.Finite(lk.Ceiling)) return Reject("light: a non-finite look");
                 double floor = Math.Max(0.05, Math.Min(0.40, lk.Floor)), ceiling = Math.Max(0.8, Math.Min(2.0, lk.Ceiling));
                 w.Open("look").Num("floor", floor).Num("ceiling", ceiling).Close();
+            }
+            if (fog.HasValue)
+            {
+                var fg = fog.Value;
+                if (fg.Mode != "exp" && fg.Mode != "exp2" && fg.Mode != "linear")
+                    return Reject($"light: fog mode '{fg.Mode}' is none of exp/exp2/linear");
+                if (!fg.Color.IsFinite) return Reject("light: a non-finite fog color");
+                var c = new Vec3(Level(fg.Color.X), Level(fg.Color.Y), Level(fg.Color.Z));
+                w.Open("fog").Vec("color", c).Str("mode", fg.Mode);
+                if (fg.Mode == "linear")
+                {
+                    if (!Vec3.Finite(fg.Start) || !Vec3.Finite(fg.End) || fg.Start < 0 || !(fg.End > fg.Start))
+                        return Reject("light: fog start/end must be end > start >= 0");
+                    w.Num("start", fg.Start).Num("end", fg.End);
+                }
+                else
+                {
+                    if (!Vec3.Finite(fg.Density) || fg.Density < 0) return Reject("light: fog density must be >= 0");
+                    w.Num("density", fg.Density);
+                }
+                w.Close();
             }
             return End(w);
         }

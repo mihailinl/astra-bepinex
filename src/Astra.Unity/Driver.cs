@@ -475,7 +475,11 @@ namespace Astra.Unity
                     {
                         light.Exposure = HdrpHook.Exposure(cam);
                         light.PipelineAmbient ??= () => HdrpHook.Ambient(main);
+                        light.PipelineFog ??= () => HdrpHook.Fog(main);
                     }
+                    // URP 17's post-exposure (1 elsewhere, including HDRP: its own exposure already
+                    // covers it): read once per light message, folded into every value the feed sends.
+                    light.PostExposure = UrpHook.PostExposure();
                     Look? look = integration?.LookFloor is float floor
                         ? new Look { Floor = floor, Ceiling = integration.LookCeiling ?? 1.40f }
                         : (Look?)null;
