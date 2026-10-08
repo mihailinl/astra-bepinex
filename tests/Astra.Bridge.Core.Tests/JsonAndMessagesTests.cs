@@ -166,6 +166,44 @@ public class JsonAndMessagesTests
             "{\"t\":\"light\",\"ambientCube\":[0,0,0,0.1,0,0,0.2,0,0,0.3,0,0,0.4,0,0,16,0,0]," +
             "\"lamps\":[{\"pos\":[1,2,3],\"range\":8,\"color\":[1,0.8,0.5],\"intensity\":12.5}]}",
             Messages.Light(null, null, cube, lamps));
+
+        // The 8-parameter overload (no fog) delegates to the 9-parameter one with null — still
+        // exactly today's JSON, nothing appended.
+        var look = new Look { Floor = 0.1, Ceiling = 1.5 };
+        Assert.Equal(
+            "{\"t\":\"light\",\"ambient\":[0.2,0.2,0.2],\"look\":{\"floor\":0.1,\"ceiling\":1.5}}",
+            Messages.Light(null, new Vec3(0.2, 0.2, 0.2), null, null, null, null, null, look));
+    }
+
+    /// <summary>`fog`: an exp/exp2 density or a linear start/end, the colour bounded like every other
+    /// light colour, an unknown mode or a bad density/extent refused naming the field; the older
+    /// overloads (no `fog` parameter) are unaffected.</summary>
+    [Fact]
+    public void light_carries_fog_bounded_and_refuses_bad_values()
+    {
+        var exp = new Fog { Color = new Vec3(0.5, 20, -1), Mode = "exp", Density = 0.15 };
+        Assert.Equal(
+            "{\"t\":\"light\",\"fog\":{\"color\":[0.5,16,0],\"mode\":\"exp\",\"density\":0.15}}",
+            Messages.Light(null, null, null, null, null, null, null, null, exp));
+
+        var exp2 = new Fog { Color = new Vec3(1, 1, 1), Mode = "exp2", Density = 0.3 };
+        Assert.Equal(
+            "{\"t\":\"light\",\"fog\":{\"color\":[1,1,1],\"mode\":\"exp2\",\"density\":0.3}}",
+            Messages.Light(null, null, null, null, null, null, null, null, exp2));
+
+        var linear = new Fog { Color = new Vec3(1, 1, 1), Mode = "linear", Start = 2, End = 10 };
+        Assert.Equal(
+            "{\"t\":\"light\",\"fog\":{\"color\":[1,1,1],\"mode\":\"linear\",\"start\":2,\"end\":10}}",
+            Messages.Light(null, null, null, null, null, null, null, null, linear));
+
+        Assert.Null(Messages.Light(null, null, null, null, null, null, null, null, new Fog { Color = new Vec3(1, 1, 1), Mode = "haze", Density = 0.1 }));
+        Assert.Contains("mode", Messages.Rejection);
+        Assert.Null(Messages.Light(null, null, null, null, null, null, null, null, new Fog { Color = new Vec3(1, 1, 1), Mode = "exp", Density = -0.1 }));
+        Assert.Contains("density", Messages.Rejection);
+        Assert.Null(Messages.Light(null, null, null, null, null, null, null, null, new Fog { Color = new Vec3(1, 1, 1), Mode = "linear", Start = 5, End = 5 }));
+        Assert.Contains("start", Messages.Rejection);
+        Assert.Null(Messages.Light(null, null, null, null, null, null, null, null, new Fog { Color = new Vec3(double.NaN, 1, 1), Mode = "exp", Density = 0.1 }));
+        Assert.Contains("fog color", Messages.Rejection);
     }
 
     [Fact]
