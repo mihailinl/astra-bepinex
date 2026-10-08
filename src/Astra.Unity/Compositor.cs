@@ -30,6 +30,7 @@ namespace Astra.Unity
         // Her picture per VIEW (0 = the main camera; others an in-game camera, a mirror).
         readonly Dictionary<int, View> views = new Dictionary<int, View>();
         Camera attached; // the Built-in camera our command buffer is on
+        DepthTextureMode previousDepthMode; // attached's, before PrepareBuiltIn touched it
         // Frames numbered up to this belong to an earlier session (see Reset).
         long floor;
         // The main camera's depth, kept at its end for a draw at the end of the whole context (KeepDepth).
@@ -310,6 +311,7 @@ namespace Astra.Unity
             if (attached != cam)
             {
                 DetachBuiltIn();
+                previousDepthMode = cam.depthTextureMode;
                 cam.depthTextureMode |= DepthTextureMode.Depth;
                 cam.AddCommandBuffer(CameraEvent.AfterImageEffects, cmd);
                 attached = cam;
@@ -321,9 +323,16 @@ namespace Astra.Unity
             cmd.DrawProcedural(Matrix4x4.identity, mat, 0, MeshTopology.Triangles, 3, 1, block);
         }
 
-        void DetachBuiltIn()
+        /// <summary>Undo <see cref="PrepareBuiltIn"/>'s camera changes (M6): the command buffer, and
+        /// the depth texture mode it switched on — never left permanently on a camera that is not
+        /// being drawn into (every desktop session with no engine, before this).</summary>
+        internal void DetachBuiltIn()
         {
-            if (attached != null) attached.RemoveCommandBuffer(CameraEvent.AfterImageEffects, cmd);
+            if (attached != null)
+            {
+                attached.RemoveCommandBuffer(CameraEvent.AfterImageEffects, cmd);
+                attached.depthTextureMode = previousDepthMode;
+            }
             attached = null;
         }
 

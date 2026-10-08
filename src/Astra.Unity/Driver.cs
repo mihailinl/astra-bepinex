@@ -635,7 +635,11 @@ namespace Astra.Unity
         {
             OnBeginCamera(cam);
             if (faulted || cam != main || compositor == null) return;
-            Fenced("draw", () => compositor.PrepareBuiltIn(cam));
+            // M6: the permanent depth pre-pass only while she is actually connected and drawn — never
+            // on a camera nobody is compositing her into (every desktop session with no engine, before
+            // this). Detaching also restores the depth texture mode PrepareBuiltIn switched on.
+            if (compositor.Show) Fenced("draw", () => compositor.PrepareBuiltIn(cam));
+            else compositor.DetachBuiltIn();
         }
 
         void Once(string key, string message)
