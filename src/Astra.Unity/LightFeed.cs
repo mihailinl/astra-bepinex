@@ -145,7 +145,11 @@ namespace Astra.Unity
             }
             else
             {
-                if (sun == null || !sun.isActiveAndEnabled || Time.unscaledTime > nextSearch)
+                // "No sun" is a cached answer too (M7): with `sun == null` on its own, THIS clause
+                // never expired, so a scene with no sun at all re-scanned every call (up to 20 Hz)
+                // instead of every 3 s — `nextSearch` must gate a re-search regardless of what the
+                // last one found. A currently-held sun going inactive still searches AT ONCE.
+                if ((sun != null && !sun.isActiveAndEnabled) || Time.unscaledTime > nextSearch)
                 {
                     sun = FindSun();
                     nextSearch = Time.unscaledTime + 3f;
@@ -584,14 +588,21 @@ namespace Astra.Unity
                 || (baking.lightmapBakeType == LightmapBakeType.Mixed && baking.mixedLightingMode == MixedLightingMode.Subtractive && l.type != LightType.Directional);
         }
 
-        static Light FindSun()
+        /// <summary>The scene's declared sun, else its brightest directional light — picked from the
+        /// already-scanned <see cref="directionalLights"/> roster (M7) rather than a fresh
+        /// <c>FindObjectsOfTypeAll</c> here: that roster is rescanned on its own 3 s cadence
+        /// (<see cref="FindDirectionals"/>), so a scene with no sun at all no longer pays for a whole
+        /// new scan every time this is asked.</summary>
+        Light FindSun()
         {
             var declared = RenderSettings.sun;
             if (declared != null && declared.isActiveAndEnabled && declared.type == LightType.Directional && !InProbes(declared)) return declared;
             Light best = null;
-            foreach (var l in Compat.FindAll<Light>())
+            foreach (var l in directionalLights)
             {
-                if (l == null || !l.isActiveAndEnabled || l.type != LightType.Directional || !l.gameObject.scene.IsValid() || InProbes(l)) continue;
+                // The roster can be up to 3 s stale (destroyed, disabled, moved out of probes since):
+                // re-check what changing state the roster itself does not re-verify until its own scan.
+                if (l == null || !l.isActiveAndEnabled || InProbes(l)) continue;
                 if (best == null || l.intensity > best.intensity) best = l;
             }
             return best;
