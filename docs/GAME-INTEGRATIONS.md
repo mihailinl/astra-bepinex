@@ -57,6 +57,7 @@ The extension points, one interface each, every one with a default that already 
 | `UseLook`: the band her light is held in | the engine's (floor 0.20, ceiling 1.40) | a game darker or brighter than most (Lethal Company: floor 0.10) |
 | `Defaults` → `IntegrationDefaults` | the foundation's | scale or `MatchPlayerHeight`, distances, ground layers, depth bias |
 | `Events` (planned, needs the engine and daemon, §5) | none | tell Astra's brain what happened: "the player died", "reached the summit", so she can comment |
+| `GameType.Find`/`.Static`/`.Member` (`Astra.Sdk.GameType`) | nothing — an integration must still know its own game's type and field names | reach a game's own types (`StartOfRound`, `PlayerControllerB`, …) by NAME, at run time, with no compile-time reference to the game's assemblies: cached `FieldInfo`/`PropertyInfo` accessors, null-safe and exception-free, logged once per miss in `GameType.Missing`. This is how every integration in `github.com/mihailinl/astra-*` builds without the game's files (`GAME-INTEGRATION-MANIFEST.md` §6) |
 
 **API rules:** additive only within a major version. `[Obsolete]` for one minor before anything is
 removed. Mono and IL2CPP expose the SAME API: the runtime differences stay inside the foundation's
