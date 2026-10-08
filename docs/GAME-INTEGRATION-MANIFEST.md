@@ -70,6 +70,16 @@ exe = "Lethal Company.exe"     # relative to the game folder
 platforms = ["windows-x64", "linux-proton"]
 anti_cheat = "none"            # anything else: Astra refuses to install
 
+# A RUNNER for many games instead of one: no appid, the user picks the exe ("Add game"), and the
+# launcher checks that the folder is that engine's (Unity Mono: UnityPlayer + <name>_Data/Managed/
+# Assembly-CSharp.dll; IL2CPP has GameAssembly.dll instead). The foundation itself ships one such
+# manifest — "Astra for any Unity game" — so a game without its own integration still gets her.
+#   [target]
+#   engine = "unity-mono"
+#   exe = "*"
+#   platforms = ["windows-x64", "linux-proton"]
+#   anti_cheat = "none"
+
 # Into the PROFILE (Astra's own folder for this game; never the game folder).
 [[files]]
 from = "BepInEx/core/**"       # paths inside the zip; ** = everything below
