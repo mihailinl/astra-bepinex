@@ -65,6 +65,7 @@ namespace Astra.Unity
         float matched = -1, pending, pendingSince;
         float lastSent; // when the last message went to the engine (unscaled time)
         float nextLightLog;
+        Camera depthAskedFor;
         string loggedLight;
         static readonly string KeepAlive = Messages.Param(new ParamSet()); // an empty set: changes nothing
 
@@ -191,6 +192,14 @@ namespace Astra.Unity
                 var pick = integration?.CameraLocator;
                 bool cameraDefaulted = pick == null;
                 main = cameraDefaulted ? defaultCamera.Locate() : Guarded("camera", pick, () => defaultCamera.Locate());
+                // Her depth test reads the camera's depth texture; URP renders one only for a camera
+                // that asks (or whose pipeline asset says so) — without it she is tested against a
+                // stale or another camera's depth and hidden everywhere. Asked once per camera.
+                if (main != null && main != depthAskedFor)
+                {
+                    Compat.RequestDepthTexture(main);
+                    depthAskedFor = main;
+                }
                 // Skip her placement and follow logic while there is no picture to draw her into
                 // anyway (M6): the engine disconnected, or the ring is not open yet.
                 if (main != null && live)
