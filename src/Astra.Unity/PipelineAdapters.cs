@@ -76,6 +76,15 @@ namespace Astra.Unity
                 Missing = "not a URP game";
                 return;
             }
+#if IL2CPP
+            // The adapters are compiled against URP's MANAGED assemblies: an IL2CPP game has none (its
+            // URP is native code behind interop wrappers), and the IL2CPP package ships no adapter. Said
+            // as what it is, never as a broken install. Her pass then cannot go inside the camera's
+            // render: she is composited after its URP camera stack, over its overlay cameras (a held
+            // item, the hands) — tested only against the base camera's depth.
+            Missing = "the IL2CPP flavour has no URP adapter: drawn over the game's URP overlay cameras too";
+            return;
+#else
             if (!Application.unityVersion.StartsWith("6000.", StringComparison.Ordinal))
             {
                 // URP 13–16 (Unity 2022–2023): her pass goes into the camera's render BEFORE its
@@ -113,6 +122,7 @@ namespace Astra.Unity
             {
                 Missing = $"the URP 17 adapter did not load ({e.GetType().Name}: {e.Message})";
             }
+#endif
         }
 
         /// <summary>Queue her pass on this camera; false (and the adapter dropped) if it fails.</summary>
@@ -175,6 +185,11 @@ namespace Astra.Unity
                 Missing = "not an HDRP game";
                 return;
             }
+#if IL2CPP
+            // As for URP (UrpHook.TryLoad): no managed HDRP to compile an adapter against, none shipped.
+            Missing = "the IL2CPP flavour has no HDRP adapter";
+            return;
+#else
             try
             {
                 attach = Adapters.Method<Func<Camera, Compositor, bool>>("Astra.Hdrp", "Astra.Unity.Hdrp", "Attach");
@@ -190,6 +205,7 @@ namespace Astra.Unity
             {
                 Missing = $"the HDRP adapter did not load ({e.GetType().Name}: {e.Message})";
             }
+#endif
         }
 
         /// <summary>HDRP's current exposure multiplier for <paramref name="cam"/> (its lights are in

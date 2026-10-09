@@ -59,15 +59,33 @@ namespace Astra.Unity
         readonly Shot[] history = new Shot[64];
         long next;
 
+        /// <summary>Why the last <see cref="Message"/> refused its camera, as a line for the log; null
+        /// when it built a message, or when the protocol's builder refused it instead (then
+        /// <c>Messages.Rejection</c> says why).</summary>
+        public string Refusal { get; private set; }
+
         /// <summary>Build the <c>cam</c> message for <paramref name="cam"/>, as <paramref name="view"/>,
-        /// now (null if it cannot be sent). Its field of view and aspect are read off the camera's
-        /// PROJECTION, which a game may set explicitly (a mirror's camera borrows the player camera's).</summary>
+        /// now (null if it cannot be sent, and <see cref="Refusal"/> says why). Its field of view and
+        /// aspect are read off the camera's PROJECTION, which a game may set explicitly (a mirror's
+        /// camera borrows the player camera's).</summary>
         public string Message(Camera cam, int maxHeight, int view = 0)
         {
+            Refusal = null;
             var pose = CameraPose.Of(cam);
             var p = cam.projectionMatrix;
+            // An orthographic camera (a menu's, a 2D scene's) has no field of view to draw her with,
+            // and the compositor never reprojects a picture through one.
+            if (cam.orthographic)
+            {
+                Refusal = Refuse(cam, lensless: false);
+                return null;
+            }
             // A projection may flip an axis (a mirror done in the projection): the lens is the same.
-            if (cam.orthographic || !(Mathf.Abs(p.m00) > 1e-4f) || !(Mathf.Abs(p.m11) > 1e-4f)) return null;
+            if (!(Mathf.Abs(p.m00) > 1e-4f) || !(Mathf.Abs(p.m11) > 1e-4f))
+            {
+                Refusal = Refuse(cam, lensless: true);
+                return null;
+            }
             float tanY = 1f / Mathf.Abs(p.m11), tanX = 1f / Mathf.Abs(p.m00);
             float aspect = tanX / tanY;
             int h = Math.Max(16, Math.Min(cam.pixelHeight, maxHeight));
@@ -86,6 +104,23 @@ namespace Astra.Unity
             string json = Messages.Cam(shot.Id, Wire.Of(shot.Pos), Wire.Of(shot.Fwd), Wire.Of(shot.Up), fovY, w, h, null, view);
             if (json != null) history[shot.Id % history.Length] = shot;
             return json;
+        }
+
+        int refusedCam;
+        bool refusedLensless;
+        string refused;
+
+        /// <summary>The refusal's line for <paramref name="cam"/>, built again only when the camera or the
+        /// reason changed: a game left on an orthographic camera is refused every frame.</summary>
+        string Refuse(Camera cam, bool lensless)
+        {
+            int id = cam.GetInstanceID();
+            if (refused != null && id == refusedCam && lensless == refusedLensless) return refused;
+            refusedCam = id;
+            refusedLensless = lensless;
+            return refused = lensless
+                ? $"the camera '{cam.name}' has a projection with no field of view: Astra cannot draw for it"
+                : $"the camera '{cam.name}' is orthographic: Astra draws for perspective cameras only";
         }
 
         public bool Find(long id, out Shot shot)

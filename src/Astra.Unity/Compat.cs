@@ -2,11 +2,21 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using Astra.Bridge;
 using UnityEngine;
 using UnityEngine.Rendering;
 #if IL2CPP
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
+// The SRP's render-event delegates: an IL2CPP game takes its own delegate types.
+using CameraHandler = Il2CppSystem.Action<UnityEngine.Rendering.ScriptableRenderContext, UnityEngine.Camera>;
+using ContextHandler = Il2CppSystem.Action<UnityEngine.Rendering.ScriptableRenderContext,
+    Il2CppSystem.Collections.Generic.List<UnityEngine.Camera>>;
+#else
+using CameraHandler = System.Action<UnityEngine.Rendering.ScriptableRenderContext, UnityEngine.Camera>;
+using ContextHandler = System.Action<UnityEngine.Rendering.ScriptableRenderContext,
+    System.Collections.Generic.List<UnityEngine.Camera>>;
 #endif
 
 namespace Astra.Unity
@@ -20,61 +30,190 @@ namespace Astra.Unity
     {
         static readonly List<Action> unhook = new List<Action>();
 
-        /// <summary>Called for each camera as the SRP starts / finishes rendering it.</summary>
-        public static void HookSrp(Action<Camera> begin, Action<Camera> end)
+        /// <summary>
+        /// Called for each camera as the SRP starts / finishes rendering it. Both or neither: when
+        /// either event cannot be subscribed, the other is undone and the answer is false, so a
+        /// camera is never prepared for a draw that never comes. <paramref name="how"/> says which
+        /// route each took ("accessors" where nothing was stripped) or, on false, why neither worked.
+        /// </summary>
+        public static bool HookSrp(Action<Camera> begin, Action<Camera> end, out string how)
         {
 #if IL2CPP
-            var b = DelegateSupport.ConvertDelegate<Il2CppSystem.Action<ScriptableRenderContext, Camera>>(
+            var b = DelegateSupport.ConvertDelegate<CameraHandler>(
                 new Action<ScriptableRenderContext, Camera>((_, cam) => begin(cam)));
-            var e = DelegateSupport.ConvertDelegate<Il2CppSystem.Action<ScriptableRenderContext, Camera>>(
+            var e = DelegateSupport.ConvertDelegate<CameraHandler>(
                 new Action<ScriptableRenderContext, Camera>((_, cam) => end(cam)));
-            RenderPipelineManager.add_beginCameraRendering(b);
-            RenderPipelineManager.add_endCameraRendering(e);
-            unhook.Add(() => RenderPipelineManager.remove_beginCameraRendering(b));
-            unhook.Add(() => RenderPipelineManager.remove_endCameraRendering(e));
+            Action<CameraHandler, bool> beginField = BeginByField, endField = EndByField;
 #else
-            Action<ScriptableRenderContext, Camera> b = (_, cam) => begin(cam);
-            Action<ScriptableRenderContext, Camera> e = (_, cam) => end(cam);
-            RenderPipelineManager.beginCameraRendering += b;
-            RenderPipelineManager.endCameraRendering += e;
-            unhook.Add(() => RenderPipelineManager.beginCameraRendering -= b);
-            unhook.Add(() => RenderPipelineManager.endCameraRendering -= e);
+            CameraHandler b = (_, cam) => begin(cam);
+            CameraHandler e = (_, cam) => end(cam);
+            // On Mono an event's backing field is private: the event itself is the only route.
+            Action<CameraHandler, bool> beginField = null, endField = null;
 #endif
+            var undoBegin = Subscribe(b, BeginByAccessor, beginField, out bool beginByField, out string whyBegin);
+            if (undoBegin == null)
+            {
+                how = "beginCameraRendering: " + whyBegin;
+                return false;
+            }
+            var undoEnd = Subscribe(e, EndByAccessor, endField, out bool endByField, out string whyEnd);
+            if (undoEnd == null)
+            {
+                TryUndo(undoBegin);
+                how = "endCameraRendering: " + whyEnd;
+                return false;
+            }
+            unhook.Add(undoBegin);
+            unhook.Add(undoEnd);
+            how = !beginByField && !endByField ? "accessors"
+                : beginByField && endByField ? $"fields: this build stripped their accessors ({whyBegin})"
+                : beginByField
+                    ? $"beginCameraRendering's field (this build stripped its accessor: {whyBegin}), endCameraRendering's accessor"
+                : $"beginCameraRendering's accessor, endCameraRendering's field (this build stripped its accessor: {whyEnd})";
+            return true;
         }
 
         /// <summary>
         /// Called when the SRP has finished a whole render CONTEXT — every camera, the stack's final
-        /// blit included, before the overlay UI. False on a Unity without the event (before 2021.1):
-        /// the caller then draws at the end of its camera instead.
+        /// blit included, before the overlay UI. False on a Unity without the event (before 2021.1),
+        /// or where neither route to it works: the caller then draws at the end of its camera
+        /// instead. <paramref name="how"/> says which route it took ("its accessor" / "its field")
+        /// or, on false, why there is none.
         /// </summary>
-        public static bool HookSrpContextEnd(Action end)
+        public static bool HookSrpContextEnd(Action end, out string how)
         {
+#if IL2CPP
+            ContextHandler e;
             try
             {
-                HookContextEnd(end);
-                return true;
+                e = DelegateSupport.ConvertDelegate<ContextHandler>(
+                    new Action<ScriptableRenderContext, Il2CppSystem.Collections.Generic.List<Camera>>((_, __) => end()));
             }
-            catch (Exception e) when (e is MissingMethodException || e is MissingMemberException || e is TypeLoadException)
+            catch (Exception x)
             {
+                // The delegate type is the one the event's field declares: a build without the event
+                // may not have that type either (an ArgumentException from the conversion, not a
+                // stripped member). The event is optional, so this is a "no", never a stop.
+                how = "no delegate of its type: " + Why(x);
                 return false;
+            }
+            Action<ContextHandler, bool> field = ContextEndByField;
+#else
+            ContextHandler e = (_, __) => end();
+            Action<ContextHandler, bool> field = null;
+#endif
+            var undo = Subscribe(e, ContextEndByAccessor, field, out bool byField, out string why);
+            if (undo == null)
+            {
+                how = why;
+                return false;
+            }
+            unhook.Add(undo);
+            how = byField ? $"its field (this build stripped its accessor: {why})" : "its accessor";
+            return true;
+        }
+
+        /// <summary>
+        /// Subscribe <paramref name="d"/> to one render event through the first route that works: the
+        /// event's own <paramref name="accessor"/> (add/remove; on Mono, <c>+=</c>/<c>-=</c>), then
+        /// its backing <paramref name="field"/> — the one Unity's own invoker reads, so writing it
+        /// works whatever the build stripped from the accessors (null on Mono, where that field is
+        /// private). A route the build removed fails when its
+        /// method compiles, and a body Il2CppInterop could not restore when it runs — both inside the
+        /// tries here, as <see cref="Stripped"/>. Returns the undo, or null when no route works;
+        /// <paramref name="byField"/> says the field took it, and <paramref name="why"/> why the
+        /// accessor did not (and, on null, the field too).
+        /// </summary>
+        static Action Subscribe<T>(T d, Action<T, bool> accessor, Action<T, bool> field, out bool byField, out string why)
+        {
+            byField = false;
+            try
+            {
+                accessor(d, true);
+                why = null;
+                return () => accessor(d, false);
+            }
+            catch (Exception x) when (Stripped(x))
+            {
+                why = Why(x);
+            }
+            if (field == null) return null;
+            try
+            {
+                field(d, true);
+                byField = true;
+                return () => field(d, false);
+            }
+            catch (Exception x) when (Stripped(x))
+            {
+                why = $"accessor: {why}; field: {Why(x)}";
+                return null;
             }
         }
 
-        // Its own method, so a Unity without endContextRendering fails when THIS is compiled, inside
-        // the caller's try.
-        static void HookContextEnd(Action end)
+        // The routes, one method each that never inlines: what the build stripped must fail when THAT
+        // method compiles — inside Subscribe's try — never when its caller does. Each route holds its
+        // own way off too, so a route whose remove is missing is never taken: nothing could undo it.
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void BeginByAccessor(CameraHandler d, bool on)
         {
 #if IL2CPP
-            var e = DelegateSupport.ConvertDelegate<Il2CppSystem.Action<ScriptableRenderContext, Il2CppSystem.Collections.Generic.List<Camera>>>(
-                new Action<ScriptableRenderContext, Il2CppSystem.Collections.Generic.List<Camera>>((_, __) => end()));
-            RenderPipelineManager.add_endContextRendering(e);
-            unhook.Add(() => RenderPipelineManager.remove_endContextRendering(e));
+            if (on) RenderPipelineManager.add_beginCameraRendering(d);
+            else RenderPipelineManager.remove_beginCameraRendering(d);
 #else
-            Action<ScriptableRenderContext, List<Camera>> e = (_, __) => end();
-            RenderPipelineManager.endContextRendering += e;
-            unhook.Add(() => RenderPipelineManager.endContextRendering -= e);
+            if (on) RenderPipelineManager.beginCameraRendering += d;
+            else RenderPipelineManager.beginCameraRendering -= d;
 #endif
         }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void EndByAccessor(CameraHandler d, bool on)
+        {
+#if IL2CPP
+            if (on) RenderPipelineManager.add_endCameraRendering(d);
+            else RenderPipelineManager.remove_endCameraRendering(d);
+#else
+            if (on) RenderPipelineManager.endCameraRendering += d;
+            else RenderPipelineManager.endCameraRendering -= d;
+#endif
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void ContextEndByAccessor(ContextHandler d, bool on)
+        {
+#if IL2CPP
+            if (on) RenderPipelineManager.add_endContextRendering(d);
+            else RenderPipelineManager.remove_endContextRendering(d);
+#else
+            if (on) RenderPipelineManager.endContextRendering += d;
+            else RenderPipelineManager.endContextRendering -= d;
+#endif
+        }
+
+#if IL2CPP
+        // The field routes, exactly as HookBuiltIn subscribes Camera.onPreCull (proven live in MiSide).
+        // A field write skips the event's thread-safe add: every subscription here runs on the main
+        // thread, as onPreCull's does.
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void BeginByField(CameraHandler d, bool on) =>
+            RenderPipelineManager.beginCameraRendering = on
+                ? Il2CppSystem.Delegate.Combine(RenderPipelineManager.beginCameraRendering, d).Cast<CameraHandler>()
+                : Il2CppSystem.Delegate.Remove(RenderPipelineManager.beginCameraRendering, d)?.TryCast<CameraHandler>();
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void EndByField(CameraHandler d, bool on) =>
+            RenderPipelineManager.endCameraRendering = on
+                ? Il2CppSystem.Delegate.Combine(RenderPipelineManager.endCameraRendering, d).Cast<CameraHandler>()
+                : Il2CppSystem.Delegate.Remove(RenderPipelineManager.endCameraRendering, d)?.TryCast<CameraHandler>();
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void ContextEndByField(ContextHandler d, bool on) =>
+            RenderPipelineManager.endContextRendering = on
+                ? Il2CppSystem.Delegate.Combine(RenderPipelineManager.endContextRendering, d).Cast<ContextHandler>()
+                : Il2CppSystem.Delegate.Remove(RenderPipelineManager.endContextRendering, d)?.TryCast<ContextHandler>();
+#endif
 
         /// <summary>The Built-in pipeline's per-camera callback before culling.</summary>
         public static void HookBuiltIn(Action<Camera> preCull)
@@ -90,14 +229,74 @@ namespace Astra.Unity
 #endif
         }
 
+        /// <summary>
+        /// Keep <paramref name="ours"/> the FIRST command buffer <paramref name="cam"/> runs at
+        /// <paramref name="evt"/> (adding it when it is not there): at the start of a camera event the
+        /// target bound is the camera's own, and a game's buffer at the same event may bind another —
+        /// a colour-only texture it blits into — which a buffer after it would draw into instead. The
+        /// game's buffers keep their order among themselves; only ours moves to the front. Buffers are
+        /// told apart by NAME (give ours a unique one): Mono's GetCommandBuffers hands back new wrapper
+        /// objects, never the ones that were added. True when ours is first; <paramref name="moved"/>
+        /// says whether it had to be put there. False where this build stripped what reordering takes:
+        /// ours is then removed and appended (where it was before this existed) and
+        /// <paramref name="why"/> says what failed.
+        /// </summary>
+        public static bool KeepFirst(Camera cam, CameraEvent evt, CommandBuffer ours, out bool moved, out string why)
+        {
+            moved = false;
+            why = null;
+            try
+            {
+                moved = PutFirst(cam, evt, ours);
+                return true;
+            }
+            catch (Exception e) when (Stripped(e))
+            {
+                why = Why(e);
+                cam.RemoveCommandBuffer(evt, ours);
+                cam.AddCommandBuffer(evt, ours);
+                return false;
+            }
+        }
+
+        /// <summary><see cref="KeepFirst"/>'s work, in a method of its own so a stripped member fails as
+        /// it compiles, inside KeepFirst's catch. Everything is READ before anything is removed: a member
+        /// that fails when called ("Method unstripping failed") must never leave the game's buffers
+        /// taken off. True when it reordered.</summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static bool PutFirst(Camera cam, CameraEvent evt, CommandBuffer ours)
+        {
+#if IL2CPP
+            // An il2cpp array: copied out, so each buffer's wrapper is held until it is added back.
+            Il2CppReferenceArray<CommandBuffer> there = cam.GetCommandBuffers(evt);
+            var list = new CommandBuffer[there == null ? 0 : there.Length];
+            for (int i = 0; i < list.Length; i++) list[i] = there[i];
+#else
+            var list = cam.GetCommandBuffers(evt) ?? new CommandBuffer[0];
+#endif
+            string name = ours.name;
+            if (list.Length > 0 && list[0] != null && list[0].name == name) return false;
+            var theirs = new List<CommandBuffer>(list.Length);
+            foreach (var b in list)
+                if (b != null && b.name != name) theirs.Add(b);
+            cam.RemoveCommandBuffers(evt);
+            cam.AddCommandBuffer(evt, ours);
+            foreach (var b in theirs) cam.AddCommandBuffer(evt, b);
+            return true;
+        }
+
         public static void UnhookAll()
         {
-            foreach (var u in unhook)
-            {
-                try { u(); }
-                catch (Exception) { /* the game is shutting down */ }
-            }
+            foreach (var u in unhook) TryUndo(u);
             unhook.Clear();
+        }
+
+        /// <summary>Run one unsubscribe, whatever it throws: the game may be shutting down, or this
+        /// build could not restore the event's remove (its handler then finds nothing to draw).</summary>
+        static void TryUndo(Action undo)
+        {
+            try { undo(); }
+            catch (Exception) { /* nothing more to do */ }
         }
 
         /// <summary>Load a bundle from memory and find the shader NAMED <paramref name="shaderName"/>
@@ -265,19 +464,249 @@ namespace Astra.Unity
             }
         }
 
-        /// <summary>Ask URP to render this camera's depth texture (her depth test needs it). Through
-        /// reflection: the plugin does not depend on URP. Harmless where there is no URP.</summary>
-        public static void RequestDepthTexture(Camera cam)
+        /// <summary>
+        /// What <see cref="RequestDepthTexture"/> changed on a camera's URP data, to be put back by
+        /// <see cref="RestoreDepthTexture"/>: the member it wrote and the value that member held
+        /// before. The default (<see cref="Changed"/> false) changed nothing.
+        /// </summary>
+        public readonly struct DepthSetting
         {
-#if !IL2CPP
+            public DepthSetting(string member, object value)
+            {
+                Member = member;
+                Value = value;
+            }
+
+            /// <summary>The field (<c>m_RequiresDepthTextureOption</c>, the camera's own three-way
+            /// option) or, where it could not be read, the property (<c>requiresDepthTexture</c>).</summary>
+            public readonly string Member;
+
+            /// <summary>What it held before.</summary>
+            public readonly object Value;
+
+            public bool Changed => Member != null;
+        }
+
+        const string DepthOption = "m_RequiresDepthTextureOption";
+        const string DepthProperty = "requiresDepthTexture";
+        const int OptionOn = 1; // CameraOverrideOption: Off, On, UsePipelineSettings
+
+        /// <summary>
+        /// Ask URP to render <paramref name="cam"/>'s depth texture (her depth test needs it), through
+        /// its own serialized camera data (<c>UniversalAdditionalCameraData</c>), found by name at run
+        /// time: the plugin does not depend on URP. True when asked, <paramref name="how"/> saying how
+        /// ("property", or "field" where an IL2CPP build stripped the property's setter), or that the
+        /// camera renders one already (nothing changed). <paramref name="before"/> is what was changed,
+        /// for <see cref="RestoreDepthTexture"/>: the camera's own option as it was, never a guess.
+        /// False where there is nothing to ask (no URP, a camera with no URP data: <paramref name="how"/>
+        /// null) or the asking failed (<paramref name="how"/> says why). Never throws: the request is
+        /// optional — without it she is drawn over everything, never stopped — so any failure is an answer.
+        /// </summary>
+        public static bool RequestDepthTexture(Camera cam, out string how, out DepthSetting before)
+        {
+            how = null;
+            before = default;
+            try
+            {
+                return AskForDepth(cam, out how, out before);
+            }
+            catch (Exception e)
+            {
+                how = Why(e); // the failure under a reflective call's wrapper
+                return false;
+            }
+        }
+
+        /// <summary>Put back what <see cref="RequestDepthTexture"/> changed on <paramref name="cam"/>
+        /// (nothing for a camera since destroyed) — only while the option still holds what the request
+        /// wrote: one the game has set since (its own settings) is its choice and stays. Null when done
+        /// or left, else why it could not be. Never throws.</summary>
+        public static string RestoreDepthTexture(Camera cam, DepthSetting before)
+        {
+            if (!before.Changed || cam == null) return null;
+            try
+            {
+                PutDepthBack(cam, before);
+                return null;
+            }
+            catch (Exception e)
+            {
+                return Why(e);
+            }
+        }
+
+        // RequestDepthTexture's work, apart so that a type or member a build stripped fails at its caller.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static bool AskForDepth(Camera cam, out string how, out DepthSetting before)
+        {
+            how = null;
+            before = default;
+#if IL2CPP
+            var data = UrpCameraData(cam);
+            if (data == null) return false;
+            var t = data.GetType();
+            // Il2CppInterop exposes a serialized field as a property of the same name that reads and
+            // writes the object's memory directly: no method of the game's runs, none can be stripped.
+            var field = t.GetProperty(DepthOption);
+            bool fieldUsable = field != null && field.CanRead && field.CanWrite && field.PropertyType.IsEnum;
+            object was = fieldUsable ? field.GetValue(data, null) : null;
+            var prop = t.GetProperty(DepthProperty);
+            if (RendersDepthAlready(was, prop, data))
+            {
+                how = AlreadyOn;
+                return true;
+            }
+            if (prop != null && prop.CanWrite)
+            {
+                try
+                {
+                    prop.SetValue(data, true, null);
+                    how = "property";
+                    before = was != null ? new DepthSetting(DepthOption, was) : new DepthSetting(DepthProperty, false);
+                    return true;
+                }
+                catch (TargetInvocationException e) when (e.InnerException != null && Stripped(e.InnerException))
+                {
+                    // The setter's body is gone from this build: the field it writes is still there.
+                    how = "field, the property's setter is stripped: " + Why(e.InnerException);
+                }
+            }
+            if (!fieldUsable)
+            {
+                how = (how != null ? how + "; " : "") + "no settable " + DepthOption;
+                return false;
+            }
+            field.SetValue(data, Enum.ToObject(field.PropertyType, OptionOn), null);
+            before = new DepthSetting(DepthOption, was);
+            how = how ?? "field, this build has no requiresDepthTexture property";
+            return true;
+#else
             foreach (var c in cam.GetComponents<Component>())
             {
                 if (c == null || c.GetType().Name != "UniversalAdditionalCameraData") continue;
-                var p = c.GetType().GetProperty("requiresDepthTexture");
-                if (p != null && p.CanWrite) p.SetValue(c, true, null);
+                var t = c.GetType();
+                var p = t.GetProperty(DepthProperty);
+                if (p == null || !p.CanWrite) continue;
+                var f = t.GetField(DepthOption, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                object was = f != null && f.FieldType.IsEnum ? f.GetValue(c) : null;
+                if (RendersDepthAlready(was, p, c))
+                {
+                    how = AlreadyOn;
+                    return true;
+                }
+                p.SetValue(c, true, null);
+                before = was != null ? new DepthSetting(DepthOption, was) : new DepthSetting(DepthProperty, false);
+                how = "property";
+                return true;
+            }
+            return false;
+#endif
+        }
+
+        const string AlreadyOn = "it renders one already: nothing changed";
+
+        /// <summary>Does the camera render its depth texture already: its own option says On, or its
+        /// property (which reads the pipeline asset's setting through "use the pipeline's") says so?
+        /// A property whose getter a build stripped answers nothing: then it is asked anyway.</summary>
+        static bool RendersDepthAlready(object option, PropertyInfo prop, object data)
+        {
+            if (option != null && Convert.ToInt32(option) == OptionOn) return true;
+            if (prop == null || !prop.CanRead) return false;
+            try
+            {
+                return prop.GetValue(data, null) is bool on && on;
+            }
+            catch (TargetInvocationException e) when (e.InnerException != null && Stripped(e.InnerException))
+            {
+                return false;
+            }
+        }
+
+        // RestoreDepthTexture's work, apart so that a type or member a build stripped fails at its caller.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void PutDepthBack(Camera cam, DepthSetting before)
+        {
+            bool option = before.Member == DepthOption;
+#if IL2CPP
+            var data = UrpCameraData(cam);
+            if (data == null) return;
+            var p = data.GetType().GetProperty(before.Member);
+            if (p == null || !p.CanWrite) return;
+            if (option && p.CanRead && Convert.ToInt32(p.GetValue(data, null)) != OptionOn) return; // the game's since
+            p.SetValue(data, before.Value, null);
+#else
+            foreach (var c in cam.GetComponents<Component>())
+            {
+                if (c == null || c.GetType().Name != "UniversalAdditionalCameraData") continue;
+                var t = c.GetType();
+                var f = t.GetField(before.Member, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (f != null)
+                {
+                    if (option && Convert.ToInt32(f.GetValue(c)) != OptionOn) return; // the game's since
+                    f.SetValue(c, before.Value);
+                    return;
+                }
+                var p = t.GetProperty(before.Member);
+                if (p != null && p.CanWrite) p.SetValue(c, before.Value, null);
+                return;
             }
 #endif
         }
+
+#if IL2CPP
+        static Type urpCameraDataType;
+        static bool urpCameraDataSought;
+
+        /// <summary>
+        /// <paramref name="cam"/>'s <c>UniversalAdditionalCameraData</c> as its interop wrapper, or null
+        /// (no URP in this game, or none on this camera). The type is resolved by name from the URP
+        /// interop assembly, once: the plugin is compiled against no URP. The component is fetched by
+        /// its IL2CPP type and wrapped by the constructor every interop type has (from its pointer): a
+        /// component handed back as a plain <c>Component</c> is never the URP type by a C# cast.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static object UrpCameraData(Camera cam)
+        {
+            if (cam == null) return null;
+            if (!urpCameraDataSought)
+            {
+                urpCameraDataSought = true;
+                urpCameraDataType = FindUrpCameraDataType();
+            }
+            var t = urpCameraDataType;
+            if (t == null) return null;
+            // No native class behind the interop type (a build that left URP out): null, not a throw.
+            var il2cppType = Il2CppType.From(t, false);
+            if (il2cppType == null) return null;
+            var c = cam.GetComponent(il2cppType);
+            return c == null ? null : Activator.CreateInstance(t, c.Pointer);
+        }
+
+        /// <summary>The interop type of URP's camera data, from the loaded URP interop assembly or, when
+        /// nothing loaded it yet, from disk; null in a game without URP.</summary>
+        static Type FindUrpCameraDataType()
+        {
+            const string assembly = "Unity.RenderPipelines.Universal.Runtime";
+            Assembly urp = null;
+            foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                string name;
+                try { name = a.GetName().Name; }
+                catch (Exception) { continue; }
+                if (name != assembly) continue;
+                urp = a;
+                break;
+            }
+            if (urp == null)
+            {
+                // Interop assemblies load on first use: URP's may be on disk with nothing loaded from it yet.
+                try { urp = Assembly.Load(assembly); }
+                catch (Exception) { return null; } // not there either: a game without URP
+            }
+            try { return urp.GetType("UnityEngine.Rendering.Universal.UniversalAdditionalCameraData", false); }
+            catch (Exception) { return null; }
+        }
+#endif
 
         /// <summary>The failure a call throws in a game whose build STRIPPED a type or member the
         /// called method names (an IL2CPP build removes every engine API the game never uses): the
@@ -285,24 +714,78 @@ namespace Astra.Unity
         /// names the API — never inside that method, which cannot even start. Il2CppInterop puts
         /// some stripped members back, and two of its stand-ins throw on use: a body it could not
         /// restore ("Method unstripping failed", NotSupportedException) and a native call the player
-        /// never registered (a plain Exception: "ICall with signature … was not resolved").</summary>
-        public static bool Stripped(Exception e) =>
-            e is TypeLoadException || e is MissingMemberException || e is NotSupportedException
-            || (e.GetType() == typeof(Exception) && e.Message.IndexOf("ICall", StringComparison.Ordinal) >= 0);
-
-        /// <summary>A URP Overlay camera: its <c>UniversalAdditionalCameraData.renderType</c> (by
-        /// reflection; false where there is no URP, and under IL2CPP, where it is not read).</summary>
-        public static bool IsUrpOverlay(Camera cam)
+        /// never registered (a plain Exception: "ICall with signature … was not resolved"). The failure
+        /// may come wrapped: in a type initializer's (a static field of a stripped type) or a reflective
+        /// call's — the wrapped <see cref="Feature.Cause"/> is judged. And a build that left out a whole
+        /// engine module (UnityEngine.PhysicsModule in a game without 3D physics) fails to LOAD its
+        /// assembly: a FileNotFoundException naming a "UnityEngine." assembly is stripped too.</summary>
+        public static bool Stripped(Exception e)
         {
-#if !IL2CPP
+            e = Feature.Cause(e);
+            return e is TypeLoadException || e is MissingMemberException || e is NotSupportedException
+                || (e is System.IO.FileNotFoundException f && f.FileName != null
+                    && f.FileName.StartsWith("UnityEngine.", StringComparison.Ordinal))
+                || (e.GetType() == typeof(Exception) && e.Message.IndexOf("ICall", StringComparison.Ordinal) >= 0);
+        }
+
+        /// <summary>Why a call failed, in one line for the log (<see cref="Feature.Describe"/>): the
+        /// failure under its wrappers, its type and message, and the method that threw where the message
+        /// names nothing ("Method unstripping failed").</summary>
+        public static string Why(Exception e) => Feature.Describe(e);
+
+        /// <summary>Reading URP's camera type, an optional part: a camera stacked on another is also known
+        /// by its view (<c>DefaultCamera.OverlayOf</c>), so a game whose build cannot read the type loses
+        /// only this check.</summary>
+        static readonly Feature urpOverlayCheck = new Feature("the URP overlay check");
+
+        /// <summary>
+        /// A URP Overlay camera: its <c>UniversalAdditionalCameraData.renderType</c>, by reflection (the
+        /// plugin does not depend on URP). Under IL2CPP it is read from the camera data's interop wrapper
+        /// (<c>UrpCameraData</c>), through the serialized field <c>m_CameraType</c> where this build
+        /// stripped the property's getter. False where there is no URP, no URP data on the camera, or the
+        /// check is off: its first failure switches it off and is said once through
+        /// <paramref name="warn"/> (<see cref="Feature"/>). Never throws.
+        /// </summary>
+        public static bool IsUrpOverlay(Camera cam, Action<string> warn)
+        {
+            bool yes = false;
+            if (cam != null) urpOverlayCheck.Run(() => yes = ReadUrpOverlay(cam), warn);
+            return yes;
+        }
+
+        // IsUrpOverlay's work, apart so that a type or member a build stripped fails at its caller.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static bool ReadUrpOverlay(Camera cam)
+        {
+#if IL2CPP
+            var data = UrpCameraData(cam);
+            if (data == null) return false;
+            var t = data.GetType();
+            var prop = t.GetProperty("renderType");
+            if (prop != null && prop.CanRead)
+            {
+                try
+                {
+                    return prop.GetValue(data, null)?.ToString() == "Overlay";
+                }
+                catch (TargetInvocationException e) when (Stripped(e))
+                {
+                    // The getter's body is gone from this build: the field it reads is still there.
+                }
+            }
+            // Il2CppInterop exposes a serialized field as a property of the same name that reads the
+            // object's memory directly: no method of the game's runs, none can be stripped.
+            var field = t.GetProperty("m_CameraType");
+            return field != null && field.CanRead && field.GetValue(data, null)?.ToString() == "Overlay";
+#else
             foreach (var c in cam.GetComponents<Component>())
             {
                 if (c == null || c.GetType().Name != "UniversalAdditionalCameraData") continue;
                 var p = c.GetType().GetProperty("renderType");
                 return p != null && p.GetValue(c, null)?.ToString() == "Overlay";
             }
-#endif
             return false;
+#endif
         }
 
         public static List<GameObject> WithTag(string tag)
@@ -335,11 +818,20 @@ namespace Astra.Unity
             return list;
         }
 
+        /// <summary>
+        /// The one hit buffer every physics query here fills, in a class of its own: Compat's own type
+        /// initializer then names no physics type, so a build without 3D physics (no RaycastHit, or no
+        /// UnityEngine.PhysicsModule at all) fails only the queries that need it — at their callers,
+        /// as <see cref="Stripped"/> — and never poisons HookSrp, HookBuiltIn or LoadShader.
+        /// </summary>
+        static class PhysicsQuery
+        {
 #if IL2CPP
-        static readonly Il2CppStructArray<RaycastHit> hits = new Il2CppStructArray<RaycastHit>(32);
+            public static readonly Il2CppStructArray<RaycastHit> Hits = new Il2CppStructArray<RaycastHit>(32);
 #else
-        static readonly RaycastHit[] hits = new RaycastHit[32];
+            public static readonly RaycastHit[] Hits = new RaycastHit[32];
 #endif
+        }
 
         static readonly Dictionary<int, bool> castsShadow = new Dictionary<int, bool>();
         // When a NEGATIVE verdict was judged (unscaled time); a POSITIVE one is kept forever and
@@ -358,10 +850,10 @@ namespace Astra.Unity
         /// </summary>
         public static bool Shadowed(Vector3 origin, Vector3 dir, float distance, HashSet<int> ignore)
         {
-            int n = Physics.RaycastNonAlloc(origin, dir, hits, distance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            int n = Physics.RaycastNonAlloc(origin, dir, PhysicsQuery.Hits, distance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
             for (int i = 0; i < n; i++)
             {
-                var h = hits[i];
+                var h = PhysicsQuery.Hits[i];
                 var c = h.collider;
                 if (c == null || h.distance <= 0) continue;
                 int id = c.GetInstanceID();
@@ -458,14 +950,14 @@ namespace Astra.Unity
         /// <summary>The nearest hit along a ray, skipping colliders in <paramref name="ignore"/> and triggers.</summary>
         public static bool Raycast(Vector3 origin, Vector3 dir, float distance, int mask, HashSet<int> ignore, out RaycastHit nearest)
         {
-            int n = Physics.RaycastNonAlloc(origin, dir, hits, distance, mask, QueryTriggerInteraction.Ignore);
+            int n = Physics.RaycastNonAlloc(origin, dir, PhysicsQuery.Hits, distance, mask, QueryTriggerInteraction.Ignore);
             return Nearest(n, ignore, out nearest);
         }
 
         /// <summary>The nearest hit of a capsule swept along <paramref name="dir"/>, skipping <paramref name="ignore"/>.</summary>
         public static bool CapsuleCast(Vector3 p1, Vector3 p2, float radius, Vector3 dir, float distance, int mask, HashSet<int> ignore, out RaycastHit nearest)
         {
-            int n = Physics.CapsuleCastNonAlloc(p1, p2, radius, dir, hits, distance, mask, QueryTriggerInteraction.Ignore);
+            int n = Physics.CapsuleCastNonAlloc(p1, p2, radius, dir, PhysicsQuery.Hits, distance, mask, QueryTriggerInteraction.Ignore);
             return Nearest(n, ignore, out nearest);
         }
 
@@ -475,7 +967,7 @@ namespace Astra.Unity
             bool found = false;
             for (int i = 0; i < n; i++)
             {
-                var h = hits[i];
+                var h = PhysicsQuery.Hits[i];
                 var c = h.collider;
                 if (c == null || ignore.Contains(c.GetInstanceID())) continue;
                 // A cast that starts inside a collider reports it at distance 0 with no point: that is

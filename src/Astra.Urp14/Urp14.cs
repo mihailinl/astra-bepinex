@@ -8,17 +8,17 @@ namespace Astra.Unity
 {
     /// <summary>
     /// URP 13–16 (Unity 2022.1–2023): she is drawn INSIDE the camera's render, right after its
-    /// opaque objects and sky and BEFORE its post-processing — so the game's own look is laid over her
+    /// transparent objects and BEFORE its post-processing — so the game's own look is laid over her
     /// as over everything else in its world: its colour grading, and the renderer features a stylised
     /// game builds its picture with (Extermination Ship's pixelation, dithering and posterisation —
     /// composited over the finished frame she stood out sharp and clean among them, the owner's
     /// first look, 2026-10-08).
     /// <para>
-    /// She is depth-tested against the camera's depth BUFFER and writes her own depth into it (the
-    /// composite shader's pass 1, as in HDRP), not against the depth TEXTURE, which URP copies at
-    /// this point or later — after her, so she is in it too, and a depth-based effect (an outline, a
-    /// fog, a depth of field) sees her like any other object. (With a depth PREPASS the depth texture
-    /// is made before any of this, without her; URP's TAA has no motion vectors for her.)
+    /// The GPU tests her depth against the camera's depth BUFFER (the composite shader's pass 1
+    /// outputs it as SV_Depth, as in HDRP), not against the depth TEXTURE. That pass does not WRITE
+    /// her depth (its ZWrite is off), so neither the depth buffer nor any depth texture URP copies
+    /// from it holds her: a depth-based effect (an outline, a fog, a depth of field) does not see
+    /// her, and URP's TAA has no motion vectors for her.
     /// </para>
     /// <para>
     /// Its own assembly, compiled against URP 14, so the plugin itself keeps compiling against Unity
@@ -59,12 +59,18 @@ namespace Astra.Unity
             public AstraPass(Compositor compositor)
             {
                 Compositor = compositor;
-                // After the world's opaque objects and its sky, before its transparent ones: glass,
-                // particles and haze in front of her are drawn over her, those behind her are hidden by
-                // the depth she writes. Enqueued at the camera's start, before the renderer's own passes
-                // and its features', so at this same event she is drawn first — before URP copies the
-                // depth (its "after opaques" mode) and the colour (for refraction): both hold her.
-                renderPassEvent = RenderPassEvent.AfterRenderingSkybox;
+                // After the world's transparent objects, still before its post-processing. Her pass
+                // TESTS her depth against the depth buffer but does not write it, so at
+                // AfterRenderingSkybox every transparent object BEHIND her (water, glass, haze, sky
+                // domes, decals) was blended over her. After the transparents nothing behind her can
+                // paint over her. Transparents IN FRONT of her (particles, glass) are drawn under her
+                // instead: the limitation every other path has, until a composite shader that writes
+                // her depth lets her go back to AfterRenderingSkybox.
+                // Enqueued at the camera's start, before the renderer's own passes and its features', so
+                // at this same event she is drawn first. URP's colour copy for refraction (the opaque
+                // texture, at AfterRenderingSkybox) is made before her, so refractive water or glass in
+                // front of her shows the world without her behind it, and she is drawn over it.
+                renderPassEvent = RenderPassEvent.AfterRenderingTransparents;
             }
 
             /// <summary>No target configured: URP draws the pass into the camera's own colour and depth

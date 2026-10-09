@@ -27,6 +27,74 @@ public class LocatorScoringTests
         Assert.Equal(0, LocatorScoring.CameraRank(rendering: false, overlay: false, orthographic: false, cullingMask: -1));
     }
 
+    // Masks read from the games' own logs: ULTRAKILL's main camera and its HUD camera, MiSide's main
+    // camera and its 'CameraPersons'.
+    const int UltrakillMain = unchecked((int)0x8fd2dfd7), UltrakillHud = 0x2000;
+    const int MiSideMain = 0x13a45, MiSidePersons = 0x1a0;
+
+    [Fact]
+    public void a_urp_overlay_is_an_overlay()
+    {
+        // URP's own camera type answers, whatever the camera's pose, clearing or layers.
+        Assert.True(LocatorScoring.IsOverlay(knownOverlay: true, sharesViewWithLowerDepthCamera: false, keepsPictureBeneath: false,
+            cullingMask: -1, beneathMask: 1));
+    }
+
+    [Fact]
+    public void a_built_in_hud_camera_that_clears_depth_only_is_an_overlay()
+    {
+        // ULTRAKILL's 'HUD Camera': the main camera's view, a higher depth, Clear Flags = Depth only,
+        // one layer the main camera does not draw.
+        Assert.True(LocatorScoring.IsOverlay(knownOverlay: false, sharesViewWithLowerDepthCamera: true, keepsPictureBeneath: true,
+            cullingMask: UltrakillHud, beneathMask: UltrakillMain));
+        Assert.True(LocatorScoring.IsOverlay(knownOverlay: false, sharesViewWithLowerDepthCamera: true, keepsPictureBeneath: true,
+            cullingMask: MiSidePersons, beneathMask: MiSideMain));
+    }
+
+    [Fact]
+    public void the_near_half_of_a_near_far_split_is_the_worlds_camera_not_an_overlay()
+    {
+        // Built-in: a 'far' camera at depth -2 (Skybox, 50-5000 m) and the tagged main camera at -1
+        // (depth only, 0.1-50 m), a child at the same pose, both drawing the same layers. The main
+        // camera keeps the far picture, but it is the world's camera: never capped below the far one.
+        Assert.False(LocatorScoring.IsOverlay(knownOverlay: false, sharesViewWithLowerDepthCamera: true, keepsPictureBeneath: true,
+            cullingMask: -1, beneathMask: -1));
+        Assert.False(LocatorScoring.IsOverlay(knownOverlay: false, sharesViewWithLowerDepthCamera: true, keepsPictureBeneath: true,
+            cullingMask: UltrakillMain, beneathMask: UltrakillMain));
+        // A near half that draws MORE than the far one (the far one skips the small props) neither.
+        Assert.False(LocatorScoring.IsOverlay(knownOverlay: false, sharesViewWithLowerDepthCamera: true, keepsPictureBeneath: true,
+            cullingMask: -1, beneathMask: 0x0f));
+    }
+
+    [Fact]
+    public void a_second_camera_that_paints_its_own_picture_is_not_an_overlay()
+    {
+        // The same view, few layers, but it does not keep the picture beneath: a Built-in camera that
+        // clears its colour, or a URP Base camera (a leftover or a duplicate), whose type is known.
+        Assert.False(LocatorScoring.IsOverlay(knownOverlay: false, sharesViewWithLowerDepthCamera: true, keepsPictureBeneath: false,
+            cullingMask: UltrakillHud, beneathMask: UltrakillMain));
+    }
+
+    [Fact]
+    public void a_camera_at_another_pose_is_never_an_overlay()
+    {
+        foreach (bool keeps in new[] { false, true })
+            Assert.False(LocatorScoring.IsOverlay(knownOverlay: false, sharesViewWithLowerDepthCamera: false, keepsPictureBeneath: keeps,
+                cullingMask: UltrakillHud, beneathMask: UltrakillMain));
+    }
+
+    [Fact]
+    public void layers_are_counted_over_all_32_bits()
+    {
+        Assert.Equal(0, LocatorScoring.Layers(0));
+        Assert.Equal(32, LocatorScoring.Layers(-1));
+        Assert.Equal(1, LocatorScoring.Layers(int.MinValue));
+        Assert.Equal(3, LocatorScoring.Layers(MiSidePersons));
+        Assert.True(LocatorScoring.DrawsFewerLayers(UltrakillHud, UltrakillMain));
+        Assert.False(LocatorScoring.DrawsFewerLayers(UltrakillMain, UltrakillHud));
+        Assert.False(LocatorScoring.DrawsFewerLayers(-1, -1));
+    }
+
     [Fact]
     public void a_camera_deeper_wins_regardless_of_the_rest()
     {

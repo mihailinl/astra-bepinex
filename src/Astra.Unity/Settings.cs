@@ -75,7 +75,7 @@ namespace Astra.Unity
                 // the game's main thread until the engine crops to her bounding rect (H4).
                 MaxPictureHeight = c.Bind("Picture", "MaxHeight", 1080, "Her picture's height at most (the game's aspect is kept). Lower = cheaper."),
                 BeforePostProcessing = c.Bind("Picture", "BeforePostProcessing", true,
-                    "URP games on Unity 2022-2023: draw her before the game's post-processing, so its look (colour grading, pixelation, dithering) is on her too. Off = over the finished frame."),
+                    "URP 2022-2023 and Built-in games: draw her inside the camera, before the game's post-processing, tested against its depth buffer, so walls drawn with any shader hide her and the game's look is on her too. Off = over the finished frame, tested against the depth texture."),
                 SendLight = c.Bind("Picture", "SendLight", true, "Light her with this game's sun and sky."),
                 Shadows = c.Bind("Picture", "Shadows", true,
                     "Let this game's own lights cast her shadow (a copy of her body that only casts shadows, never drawn)."),
