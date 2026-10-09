@@ -530,8 +530,18 @@ namespace Astra.Unity
         /// </summary>
         public void PrepareBuiltIn(Camera cam)
         {
-            // A target with no depth buffer leaves nothing to test her against inside the render.
-            bool inside = settings.BeforePostProcessing.Value && !(cam.targetTexture != null && cam.targetTexture.depth == 0);
+            // Inside the camera (before its image effects, against its depth BUFFER) only when nothing of
+            // the game reads its depth TEXTURE: a game that asks its camera for one (depth or
+            // depth+normals — its own outlines, fog, depth of field, ambient occlusion) builds its look
+            // from that texture, which never holds her, so inside she got its outlines and haze of what
+            // stands BEHIND her drawn over her (MiSide's object outlines). Such a game keeps that texture
+            // right for its own effects, so after them she is tested against it — and a game that asks
+            // for none (ULTRAKILL: its world shaders never reach it) is drawn inside. The mode bits she
+            // switched on herself are not the game's. A target with no depth buffer leaves nothing to test
+            // her against inside the render either.
+            var ours = addedDepthBit && attached == cam ? DepthTextureMode.Depth : DepthTextureMode.None;
+            bool gameReadsDepth = ((cam.depthTextureMode & ~ours) & (DepthTextureMode.Depth | DepthTextureMode.DepthNormals)) != 0;
+            bool inside = settings.BeforePostProcessing.Value && !gameReadsDepth && !(cam.targetTexture != null && cam.targetTexture.depth == 0);
             var evt = inside ? CameraEvent.AfterForwardAlpha : CameraEvent.AfterImageEffects;
             if (attached != cam || attachedEvt != evt)
             {
@@ -546,7 +556,9 @@ namespace Astra.Unity
                 seenBuffers = -1; // put on the camera just below
                 SayOnce(inside
                     ? $"Built-in: drawn inside '{cam.name}' right after its transparent objects, tested against its depth buffer (the game's image effects apply to her)"
-                    : $"Built-in: drawn into '{cam.name}' after its image effects, tested against its depth texture (walls whose shaders cast no shadows do not hide her)");
+                    : gameReadsDepth && settings.BeforePostProcessing.Value
+                        ? $"Built-in: '{cam.name}' renders a depth texture for the game's own effects — drawn after them, tested against it"
+                        : $"Built-in: drawn into '{cam.name}' after its image effects, tested against its depth texture (walls whose shaders cast no shadows do not hide her)");
             }
             else if (!inside && (cam.depthTextureMode & DepthTextureMode.Depth) == 0)
             {
