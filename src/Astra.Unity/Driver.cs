@@ -118,6 +118,7 @@ namespace Astra.Unity
                     compositor.Note = m => log.LogInfo("compositor: " + m);
                 }
                 shadow = new ShadowCaster { Note = m => log.LogInfo(m) };
+                light.Note = m => log.LogInfo(m);
                 srp = GraphicsSettings.currentRenderPipeline != null;
                 string pipeline = Compat.PipelineClass();
                 hdrp = srp && pipeline != null && pipeline.EndsWith(".HDRenderPipelineAsset", StringComparison.Ordinal);
@@ -214,11 +215,55 @@ namespace Astra.Unity
                     if (picked != null && picked != lastPick)
                     {
                         lastPick = picked;
-                        log.LogInfo("picked " + picked);
+                        log.LogInfo("picked " + picked + (cameraDefaulted ? defaultCamera.Inventory : ""));
                     }
                     else if (picked == null) lastPick = null;
+                    if (Time.unscaledTime > nextWhereLog) LogWhere(main);
                 }
             });
+        }
+
+        float nextWhereLog;
+        string lastWhere;
+        int drawnThen, picturesThen;
+
+        /// <summary>
+        /// Where she stands for the camera and whether she is drawn — checked every 10 s, said when it
+        /// changed: the line that answers "I don't see her" (behind you? off screen? pictures arrive but
+        /// none is drawn? no picture from Astra at all?).
+        /// </summary>
+        void LogWhere(Camera cam)
+        {
+            nextWhereLog = Time.unscaledTime + 10f;
+            if (compositor == null) return;
+            int drawn = compositor.Drawn - drawnThen, pictures = compositor.Pictures - picturesThen;
+            drawnThen = compositor.Drawn;
+            picturesThen = compositor.Pictures;
+            string state, where;
+            if (!her.Placed)
+            {
+                state = "unplaced";
+                where = "not placed yet";
+            }
+            else
+            {
+                var p = cam.WorldToViewportPoint(her.Position + Vector3.up * (HerHeight * scale * 0.5f));
+                float d = Vector3.Distance(cam.transform.position, her.Position);
+                state = p.z <= 0 ? "behind" : p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1 ? "off" : "on";
+                where = (state == "behind" ? "behind the camera" : state == "off" ? $"off screen ({p.x:0.##}, {p.y:0.##})" : $"on screen ({p.x:0.##}, {p.y:0.##})")
+                    + $", {d:0.#} m from '{cam.name}'";
+            }
+            float cover = compositor.Coverage;
+            state += (drawn > 0 ? "+drawn" : "") + (pictures > 0 ? "+pictures" : "") + (compositor.Show ? "" : "+hidden")
+                + (cover == 0 ? "+empty" : "");
+            if (state == lastWhere) return;
+            lastWhere = state;
+            log.LogInfo($"her: {where}; in 10 s drawn {drawn} times from {pictures} new pictures" +
+                (cover >= 0 ? $", her picture {cover * 100:0.#}% covered" : "") +
+                (!compositor.Show ? " (hidden: toggled off, or Astra not connected)"
+                    : pictures == 0 ? " (no picture from Astra)"
+                    : drawn == 0 ? " (pictures arrive, none is drawn)"
+                    : cover == 0 ? " (Astra's picture is empty)" : ""));
         }
 
         /// <summary>
@@ -521,6 +566,7 @@ namespace Astra.Unity
 
         void OnBeginCamera(Camera cam)
         {
+            defaultCamera.Rendered(cam);
             // Only where she can be drawn INTO another camera (URP — Built-in and HDRP composite into
             // the main one only) and while she is shown: else a view would be drawn for nobody.
             if (!faulted && cam != main && compositor != null && srp && !hdrp && compositor.Show && her.Placed && link != null && link.Ready && IsExtra(cam))
@@ -555,7 +601,7 @@ namespace Astra.Unity
                     if (hdrp)
                     {
                         light.Exposure = HdrpHook.Exposure(cam);
-                        light.PipelineAmbient ??= () => HdrpHook.Ambient(main);
+                        light.PipelineAmbient ??= directions => HdrpHook.Ambient(main, directions);
                         light.PipelineFog ??= () => HdrpHook.Fog(main);
                     }
                     // URP 17's post-exposure (1 elsewhere, including HDRP: its own exposure already

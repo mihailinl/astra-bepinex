@@ -42,6 +42,7 @@ static class Program
         {
             Console.Error.WriteLine("usage: check-game-members check <ManagedDir> <members.tsv>");
             Console.Error.WriteLine("       check-game-members dump <ManagedDir> <TypeName>");
+            Console.Error.WriteLine("       check-game-members il2cpp <plugin.dll> <BepInEx/interop dir>");
             return 2;
         }
 
@@ -52,6 +53,8 @@ static class Program
             case "dump" when args.Length == 3:
                 RunDump(args[1], args[2]);
                 return 0;
+            case "il2cpp" when args.Length == 3:
+                return Il2CppRefs.Run(args[1], args[2]);
             default:
                 Console.Error.WriteLine("bad arguments");
                 return 2;

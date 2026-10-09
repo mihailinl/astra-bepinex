@@ -3,6 +3,10 @@
 # (unity/AstraShaders/Assets). A bundle loads in its own Unity line and newer ones, so each line a game
 # may run gets its own: astra-<major>-<platform>.bundle, beside the others in unity/AstraShaders/Build.
 # Usage: tools/build-bundles.sh /path/to/Unity  (e.g. ~/Unity/Hub/Editor/2022.3.62f2/Editor/Unity)
+#   UNITY_EXTRA_LIBS=<dir>  prepended to LD_LIBRARY_PATH — an older editor on a newer distro may need
+#                           a library the distro no longer ships (2021.3 wants libxml2.so.2).
+# An older editor's licensing client loads a library with an executable stack, which glibc 2.41+
+# refuses unless allowed: the editor runs with glibc.rtld.execstack=2 (set GLIBC_TUNABLES to override).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 EDITOR=${1:?path to a Unity editor binary}
@@ -18,7 +22,11 @@ python3 -c "import json,sys; m=json.load(open(sys.argv[1])); m['dependencies']={
   "$SRC/Packages/manifest.json" "$PROJ/Packages/manifest.json"
 echo "m_EditorVersion: $VERSION" > "$PROJ/ProjectSettings/ProjectVersion.txt"
 echo "building the bundles with Unity $VERSION in $PROJ"
-"$EDITOR" -batchmode -quit -nographics -projectPath "$PROJ" -executeMethod BuildBundles.Build -logFile "$PROJ/build.log" || {
+# A 2021/2022 editor on Linux can hang forever after compiling the scripts: bee_backend's
+# --stdin-canary keeps it from closing. Wrap that editor's Data/bee_backend once (Unity forum, "Linux
+# editor stuck on loading because of bee_backend w/ workaround"): rename it bee_backend_real and put
+# in its place a script that drops --stdin-canary and execs "${0}_real" with the other arguments.
+LD_LIBRARY_PATH=${UNITY_EXTRA_LIBS:-}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} GLIBC_TUNABLES=${GLIBC_TUNABLES:-glibc.rtld.execstack=2} "$EDITOR" -batchmode -quit -nographics -projectPath "$PROJ" -executeMethod BuildBundles.Build -logFile "$PROJ/build.log" || {
   grep -E 'error|Exception' "$PROJ/build.log" | head -20; exit 1; }
 cp "$PROJ"/Build/astra-*.bundle "$SRC/Build/"
 ls -la "$SRC"/Build/astra-*.bundle

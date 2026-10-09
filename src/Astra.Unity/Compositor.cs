@@ -56,6 +56,27 @@ namespace Astra.Unity
         /// <summary>Whether she is shown at all (the toggle, General.Enabled, and a live link).</summary>
         public bool Show { get; set; } = true;
 
+        /// <summary>How many times she was drawn into a camera, and how many new pictures were taken
+        /// from Astra — running counts, for the "where is she" line.</summary>
+        public int Drawn, Pictures;
+
+        /// <summary>The share of her newest picture that is not fully transparent, sampled every 5 s
+        /// (−1 before the first): 0 means Astra drew an EMPTY picture — she is out of the view it was
+        /// drawn for.</summary>
+        public float Coverage { get; private set; } = -1;
+        float nextCoverage;
+
+        static float AlphaShare(IntPtr colour, int bytes)
+        {
+            int pixels = bytes / 4, step = Math.Max(1, pixels / 8192), seen = 0, solid = 0;
+            for (int i = 0; i < pixels; i += step)
+            {
+                seen++;
+                if (System.Runtime.InteropServices.Marshal.ReadByte(colour, i * 4 + 3) != 0) solid++;
+            }
+            return seen == 0 ? 0 : (float)solid / seen;
+        }
+
         /// <summary>False in a pipeline whose depth texture this pass cannot read as it is (HDRP):
         /// she is then drawn over everything rather than hidden at random.</summary>
         public bool DepthTest { get; set; } = true;
@@ -224,6 +245,11 @@ namespace Astra.Unity
             }
             v.Colour.LoadRawTextureData(f.Colour, f.PlaneBytes);
             v.Depth.LoadRawTextureData(f.Depth, f.PlaneBytes);
+            if (view == 0 && Time.unscaledTime >= nextCoverage)
+            {
+                nextCoverage = Time.unscaledTime + 5f;
+                Coverage = AlphaShare(f.Colour, f.PlaneBytes);
+            }
             if (!Ring.StillValid(ref f))
             {
                 // The engine reused the slot while we copied: this copy is torn and is never applied.
@@ -234,6 +260,7 @@ namespace Astra.Unity
             }
             v.Colour.Apply(false, false);
             v.Depth.Apply(false, false);
+            Pictures++;
             v.Shown = f;
             v.Have = true;
             return v;
@@ -272,9 +299,53 @@ namespace Astra.Unity
             if (kept) block.SetTexture(IdGameDepth, this.keptDepth);
             cmd.Clear();
             if (cam.targetTexture != null) cmd.SetRenderTarget(cam.targetTexture);
+            // At the end of the whole context no camera is rendering, and "the camera's target" can
+            // be the LAST camera's — a game's monitor or minimap camera drawing into its own texture
+            // (Extermination Ship has eight beside the player's): her picture went into that texture
+            // and never reached the screen. A screen camera's target is named: its display.
+            else if (keptDepth)
+            {
+                bool screen = ActivateScreenOf(cam);
+                cmd.SetRenderTarget(screen ? BuiltinRenderTextureType.CurrentActive : BuiltinRenderTextureType.CameraTarget);
+                if (!targetSaid)
+                {
+                    targetSaid = true;
+                    Note?.Invoke(screen ? $"drawn at the end of the frame onto display {cam.targetDisplay}'s back buffer"
+                        : "drawn at the end of the frame onto the camera's target (this build cannot name the display's back buffer)");
+                }
+            }
             else cmd.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
             cmd.DrawProcedural(Matrix4x4.identity, mat, 0, MeshTopology.Triangles, 3, 1, block);
             Graphics.ExecuteCommandBuffer(cmd);
+        }
+
+        static bool noScreenTarget;
+        bool targetSaid;
+
+        /// <summary>Make the back buffer of the display <paramref name="cam"/> renders to the active
+        /// target; false (and the camera's target is used, as before) where the game's build removed
+        /// what that takes.</summary>
+        static bool ActivateScreenOf(Camera cam)
+        {
+            if (noScreenTarget) return false;
+            try
+            {
+                ActivateDisplay(cam.targetDisplay);
+                return true;
+            }
+            catch (Exception e) when (Compat.Stripped(e))
+            {
+                noScreenTarget = true;
+                return false;
+            }
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static void ActivateDisplay(int i)
+        {
+            var displays = Display.displays;
+            var display = displays != null && i >= 0 && i < displays.Length ? displays[i] : Display.main;
+            Graphics.SetRenderTarget(display.colorBuffer, display.depthBuffer);
         }
 
         /// <summary>
@@ -388,6 +459,7 @@ namespace Astra.Unity
             // camera, 0 = "ask _ProjectionParams", which Unity sets for that target.
             float flip = !srp ? 0 : GL.GetGPUProjectionMatrix(Matrix4x4.identity, intoTexture).m11 < 0 ? -1 : 1;
             b.SetVector(IdOut, new Vector4(flip, WriteLinear(s) ? 1 : 0, 1, 0));
+            Drawn++;
             return true;
         }
 

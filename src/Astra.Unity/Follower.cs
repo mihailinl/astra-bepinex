@@ -386,15 +386,86 @@ namespace Astra.Unity
             nextSearch = Time.unscaledTime + 2f;
             Camera found;
             string why;
+            // Camera.main, unless it is plainly not the world's camera: a UI camera tagged MainCamera,
+            // a URP overlay, one not rendering. An orthographic Camera.main stays (an isometric game's).
             var tagged = Camera.main;
-            if (ToScreen(tagged)) { found = tagged; why = "Camera.main"; }
-            else { found = Best(); why = "highest-depth camera with no render target"; }
+            if (ToScreen(tagged) && Rank(tagged) > 0 && (tagged.cullingMask & ~LocatorScoring.UiLayerBit) != 0) { found = tagged; why = "Camera.main"; }
+            else { found = Best(); why = found != null && Rank(found) == 2 ? "the camera that draws the world" : "highest-depth camera with no render target"; }
             if (found != current)
             {
                 current = found;
                 Description = found != null ? $"'{found.name}' ({why})" : "none";
+                Inventory = Describe();
             }
             return current;
+        }
+
+        /// <summary>Every camera this pick weighed, one per line — logged with a pick, so a tester's log
+        /// shows what the scene offered when the pick is wrong.</summary>
+        public string Inventory = "";
+
+        /// <summary>A camera began rendering (any camera, every frame): what <see cref="Rank"/> calls
+        /// "seen rendering".</summary>
+        public void Rendered(Camera c)
+        {
+            if (c == null) return;
+            renderedAt[c.GetInstanceID()] = Time.frameCount;
+            Prune();
+        }
+
+        struct Weighed { public int FirstFrame; public float LastTime; }
+
+        readonly Dictionary<int, int> renderedAt = new Dictionary<int, int>();
+        readonly Dictionary<int, Weighed> weighed = new Dictionary<int, Weighed>();
+        readonly Dictionary<int, bool> overlay = new Dictionary<int, bool>();
+        int prunedAt;
+
+        /// <summary>
+        /// <see cref="LocatorScoring.CameraRank"/> for <paramref name="c"/>. "Rendering" is given the
+        /// benefit of the doubt: a camera rendered within 30 frames, or one weighed FRESH within 30
+        /// frames — first seen, or back after more than 3 s unweighed (a disabled camera is never
+        /// listed). A scene's new Camera.main, or a gameplay camera switched back on after a cutscene,
+        /// is picked in the LateUpdate BEFORE its first render, and must not lose to a UI camera.
+        /// </summary>
+        int Rank(Camera c)
+        {
+            int id = c.GetInstanceID(), now = Time.frameCount;
+            float t = Time.unscaledTime;
+            if (!weighed.TryGetValue(id, out var w) || t - w.LastTime > 3f) w.FirstFrame = now;
+            w.LastTime = t;
+            weighed[id] = w;
+            bool rendering = (renderedAt.TryGetValue(id, out int at) && now - at <= 30) || now - w.FirstFrame < 30;
+            return LocatorScoring.CameraRank(rendering, Overlay(c), c.orthographic, c.cullingMask);
+        }
+
+        /// <summary>Forget cameras long gone — not rendered for 300 frames, not weighed for 10 s — at
+        /// most once a second (by frames), never the live ones.</summary>
+        void Prune()
+        {
+            int now = Time.frameCount;
+            if (renderedAt.Count + weighed.Count <= 128 || now - prunedAt < 60) return;
+            prunedAt = now;
+            float t = Time.unscaledTime;
+            var stale = new List<int>();
+            foreach (var kv in renderedAt)
+                if (now - kv.Value > 300) stale.Add(kv.Key);
+            foreach (var id in stale) renderedAt.Remove(id);
+            stale.Clear();
+            foreach (var kv in weighed)
+                if (t - kv.Value.LastTime > 10f) stale.Add(kv.Key);
+            foreach (var id in stale) weighed.Remove(id);
+        }
+
+        /// <summary>A URP Overlay camera (its <c>UniversalAdditionalCameraData.renderType</c>, by
+        /// reflection — the plugin does not depend on URP; never known under IL2CPP).</summary>
+        bool Overlay(Camera c)
+        {
+            int id = c.GetInstanceID();
+            if (overlay.TryGetValue(id, out bool yes)) return yes;
+            yes = Compat.IsUrpOverlay(c);
+            if (overlay.Count > 64) overlay.Clear();
+            overlay[id] = yes;
+            return yes;
         }
 
         static bool ToScreen(Camera c) => c != null && c.isActiveAndEnabled && c.targetTexture == null;
@@ -402,22 +473,38 @@ namespace Astra.Unity
         Camera Best()
         {
             Camera found = null;
+            int bestRank = 0;
             float bestDepth = 0, bestSince = 0, bestArea = 0;
             float now = Time.unscaledTime;
             foreach (var c in Camera.allCameras)
             {
                 if (!ToScreen(c)) continue;
+                int rank = Rank(c);
                 float since = Track(c, now);
                 var r = c.pixelRect;
                 float area = r.width * r.height;
-                if (found != null && !LocatorScoring.BetterCamera(c.depth, since, area, bestDepth, bestSince, bestArea))
+                if (found != null && !LocatorScoring.BetterCamera(rank, c.depth, since, area, bestRank, bestDepth, bestSince, bestArea))
                     continue;
                 found = c;
+                bestRank = rank;
                 bestDepth = c.depth;
                 bestSince = since;
                 bestArea = area;
             }
             return found;
+        }
+
+        string Describe()
+        {
+            var lines = new System.Text.StringBuilder();
+            foreach (var c in Camera.allCameras)
+            {
+                if (c == null) continue;
+                lines.Append($"\n    '{c.name}': rank {Rank(c)}, depth {c.depth:0.##}, {(c.orthographic ? "orthographic" : $"fov {c.fieldOfView:0}")}, " +
+                    $"mask 0x{c.cullingMask:x}, {(c.targetTexture != null ? "into a texture" : "to the screen")}{(Overlay(c) ? ", URP overlay" : "")}" +
+                    $"{(c == Camera.main ? ", MainCamera" : "")}");
+            }
+            return lines.ToString();
         }
 
         /// <summary>When <paramref name="c"/> last moved (now, the first time it is seen, so a

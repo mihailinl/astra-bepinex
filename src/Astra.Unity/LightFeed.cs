@@ -69,8 +69,17 @@ namespace Astra.Unity
         public bool Physical { get; set; }
 
         /// <summary>The pipeline's own ambient probe where it does not keep the scene's (HDRP's sky
-        /// probe); null = use <c>RenderSettings.ambientProbe</c>.</summary>
-        public Func<SphericalHarmonicsL2?> PipelineAmbient { get; set; }
+        /// probe), evaluated toward the given directions — null when it has none to give; an unset
+        /// one = use <c>RenderSettings.ambientProbe</c>.</summary>
+        public Func<Vector3[], Color[]> PipelineAmbient { get; set; }
+
+        /// <summary>Said once, when the game's build has no light probe type at all (<see cref="Sh"/>).</summary>
+        public Action<string> Note { get; set; }
+
+        /// <summary>The game's build removed what reading its light probes / its ambient probe takes
+        /// (<see cref="Sh"/>): skipped for the rest of the run — with no ambient probe, her ambient comes
+        /// from <see cref="RenderSettings"/>' ambient COLOURS.</summary>
+        static bool noLocalProbes, noAmbientProbe;
 
         /// <summary>HDRP's own Fog volume (<see cref="Physical"/> only — Built-in/URP read
         /// <c>RenderSettings.fog</c> directly); null = no adapter. <c>enabled</c> false = no active
@@ -347,32 +356,48 @@ namespace Astra.Unity
         /// <summary>The ambient cube at <paramref name="at"/>, in the bridge's axes (z flips: Unity's
         /// +Z face is the bridge's −Z) — and where it came from (<see cref="ambientSrc"/>): LOCAL light
         /// probes interpolated here, GLOBAL one scene-wide value (<c>RenderSettings.ambientProbe</c>,
-        /// or HDRP's own sky probe via <see cref="PipelineAmbient"/>), or NONE — a physical pipeline
-        /// (HDRP) that gave neither, so the cube reads all zero.</summary>
+        /// HDRP's own sky probe via <see cref="PipelineAmbient"/>, or — in a build with no probe type —
+        /// the scene's ambient colours), or NONE — a physical pipeline (HDRP) that gave neither, so the
+        /// cube reads all zero.</summary>
         void Ambient(Vector3 at)
         {
-            SphericalHarmonicsL2 sh;
-            var probes = LightmapSettings.lightProbes;
-            if (probes != null && probes.count > 0)
+            // Each read is its own guarded call (Sh's methods never inline): a build that removed only
+            // the light-probe query keeps the scene's ambient probe, and one without either keeps its
+            // ambient colours.
+            Color[] c = null;
+            if (!noLocalProbes)
             {
-                LightProbes.GetInterpolatedProbe(at, null, out sh);
-                ambientSrc = "local";
-            }
-            else
-            {
-                var pipeline = PipelineAmbient?.Invoke();
-                if (pipeline.HasValue)
+                try
                 {
-                    sh = pipeline.Value;
-                    ambientSrc = "global";
+                    c = Sh.Local(at, probeDirections);
+                    if (c != null) ambientSrc = "local";
                 }
-                else
+                catch (Exception e) when (Compat.Stripped(e))
                 {
-                    sh = RenderSettings.ambientProbe;
+                    noLocalProbes = true;
+                    Note?.Invoke($"this game's build cannot read its light probes ({e.GetType().Name}): her ambient is the scene's");
+                }
+            }
+            if (c == null && (c = PipelineAmbient?.Invoke(probeDirections)) != null) ambientSrc = "global";
+            if (c == null && !noAmbientProbe)
+            {
+                try
+                {
+                    c = Sh.Global(probeDirections);
                     ambientSrc = Physical ? "none" : "global";
                 }
+                catch (Exception e) when (Compat.Stripped(e))
+                {
+                    noAmbientProbe = true;
+                    Note?.Invoke($"this game's build has no ambient probe ({e.GetType().Name}): her ambient comes from its ambient colours");
+                }
             }
-            var c = Compat.EvaluateSh(sh, probeDirections);
+            if (c == null && noAmbientProbe && (c = Flat()) != null) ambientSrc = "global";
+            if (c == null)
+            {
+                ambientSrc = "none";
+                c = new Color[probeDirections.Length];
+            }
             float scale = (Physical ? Exposure : 1f) * PostExposure;
             Vec3 Face(int i) => new Vec3(Fine(Mathf.Max(0, c[i].r) * scale), Fine(Mathf.Max(0, c[i].g) * scale), Fine(Mathf.Max(0, c[i].b) * scale));
             cube[0] = Face(0);
@@ -384,6 +409,40 @@ namespace Astra.Unity
             // A physical pipeline's sky probe that answered with nothing (HDRP with no sky, Lethal
             // Company) is no reading, not a black sky: the engine estimates one from the sun.
             if (Physical && ambientSrc == "global" && Dark(cube)) ambientSrc = "none";
+        }
+
+        /// <summary>
+        /// A build with no ambient probe: the scene's ambient COLOURS — Trilight's sky above, equator
+        /// around, ground below; a Flat scene's one colour everywhere. Linear, like the probe it stands
+        /// in for (Unity keeps these colours in gamma). Null for a Skybox scene (its colours are
+        /// leftovers nothing renders with: the engine's own estimate is better) and when even these
+        /// were removed.
+        /// </summary>
+        Color[] Flat()
+        {
+            try
+            {
+                return FlatColours();
+            }
+            catch (Exception e) when (Compat.Stripped(e))
+            {
+                return null;
+            }
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        Color[] FlatColours()
+        {
+            var mode = RenderSettings.ambientMode;
+            if (mode == AmbientMode.Skybox) return null;
+            bool tri = mode == AmbientMode.Trilight, linear = QualitySettings.activeColorSpace == ColorSpace.Linear;
+            Color Lin(Color g) => linear ? g.linear : g;
+            Color sky = Lin(RenderSettings.ambientSkyColor);
+            Color equator = tri ? Lin(RenderSettings.ambientEquatorColor) : sky, ground = tri ? Lin(RenderSettings.ambientGroundColor) : sky;
+            var faces = new Color[probeDirections.Length];
+            for (int i = 0; i < faces.Length; i++)
+                faces[i] = probeDirections[i].y > 0.5f ? sky : probeDirections[i].y < -0.5f ? ground : equator;
+            return faces;
         }
 
         static bool Dark(Vec3[] faces)

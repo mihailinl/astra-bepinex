@@ -239,6 +239,32 @@ namespace Astra.Unity
 #endif
         }
 
+        /// <summary>The failure a call throws in a game whose build STRIPPED a type or member the
+        /// called method names (an IL2CPP build removes every engine API the game never uses): the
+        /// method fails to compile the first time it runs. Catch it at the CALLER of a method that
+        /// names the API — never inside that method, which cannot even start. Il2CppInterop puts
+        /// some stripped members back, and two of its stand-ins throw on use: a body it could not
+        /// restore ("Method unstripping failed", NotSupportedException) and a native call the player
+        /// never registered (a plain Exception: "ICall with signature … was not resolved").</summary>
+        public static bool Stripped(Exception e) =>
+            e is TypeLoadException || e is MissingMemberException || e is NotSupportedException
+            || (e.GetType() == typeof(Exception) && e.Message.IndexOf("ICall", StringComparison.Ordinal) >= 0);
+
+        /// <summary>A URP Overlay camera: its <c>UniversalAdditionalCameraData.renderType</c> (by
+        /// reflection; false where there is no URP, and under IL2CPP, where it is not read).</summary>
+        public static bool IsUrpOverlay(Camera cam)
+        {
+#if !IL2CPP
+            foreach (var c in cam.GetComponents<Component>())
+            {
+                if (c == null || c.GetType().Name != "UniversalAdditionalCameraData") continue;
+                var p = c.GetType().GetProperty("renderType");
+                return p != null && p.GetValue(c, null)?.ToString() == "Overlay";
+            }
+#endif
+            return false;
+        }
+
         public static List<GameObject> WithTag(string tag)
         {
             var list = new List<GameObject>();
@@ -422,25 +448,6 @@ namespace Astra.Unity
                 found = true;
             }
             return found;
-        }
-
-        /// <summary>A light probe's light on a surface facing each of <paramref name="directions"/>
-        /// (what the game's own shaders get from it).</summary>
-        public static Color[] EvaluateSh(SphericalHarmonicsL2 sh, Vector3[] directions)
-        {
-#if IL2CPP
-            var dirs = new Il2CppStructArray<Vector3>(directions.Length);
-            var cols = new Il2CppStructArray<Color>(directions.Length);
-            for (int i = 0; i < directions.Length; i++) dirs[i] = directions[i];
-            sh.Evaluate(dirs, cols);
-            var result = new Color[directions.Length];
-            for (int i = 0; i < result.Length; i++) result[i] = cols[i];
-            return result;
-#else
-            var cols = new Color[directions.Length];
-            sh.Evaluate(directions, cols);
-            return cols;
-#endif
         }
 
         /// <summary>The active render pipeline asset's class, by its NATIVE type: under IL2CPP a wrapper's

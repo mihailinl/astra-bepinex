@@ -9,30 +9,49 @@ using Xunit;
 public class LocatorScoringTests
 {
     [Fact]
+    public void a_camera_that_draws_the_world_beats_a_deeper_ui_camera()
+    {
+        // Extermination Ship's kind of scene: the player's camera at depth 0, a UI camera above it.
+        Assert.True(LocatorScoring.BetterCamera(rank: 2, depth: 0, since: 0, area: 1, bestRank: 1, bestDepth: 5, bestSince: 1000, bestArea: 1000));
+        Assert.False(LocatorScoring.BetterCamera(rank: 1, depth: 5, since: 1000, area: 1000, bestRank: 2, bestDepth: 0, bestSince: 0, bestArea: 1));
+    }
+
+    [Fact]
+    public void a_camera_ranks_by_what_it_draws()
+    {
+        Assert.Equal(2, LocatorScoring.CameraRank(rendering: true, overlay: false, orthographic: false, cullingMask: -1));
+        Assert.Equal(2, LocatorScoring.CameraRank(rendering: true, overlay: false, orthographic: false, cullingMask: 1 << 9)); // a game's own layers only
+        Assert.Equal(1, LocatorScoring.CameraRank(rendering: true, overlay: false, orthographic: true, cullingMask: -1));
+        Assert.Equal(1, LocatorScoring.CameraRank(rendering: true, overlay: false, orthographic: false, cullingMask: LocatorScoring.UiLayerBit));
+        Assert.Equal(0, LocatorScoring.CameraRank(rendering: true, overlay: true, orthographic: false, cullingMask: -1));
+        Assert.Equal(0, LocatorScoring.CameraRank(rendering: false, overlay: false, orthographic: false, cullingMask: -1));
+    }
+
+    [Fact]
     public void a_camera_deeper_wins_regardless_of_the_rest()
     {
-        Assert.True(LocatorScoring.BetterCamera(depth: 1, since: 0, area: 1, bestDepth: 0, bestSince: 1000, bestArea: 1000));
-        Assert.False(LocatorScoring.BetterCamera(depth: 0, since: 1000, area: 1000, bestDepth: 1, bestSince: 0, bestArea: 0));
+        Assert.True(LocatorScoring.BetterCamera(rank: 2, depth: 1, since: 0, area: 1, bestRank: 2, bestDepth: 0, bestSince: 1000, bestArea: 1000));
+        Assert.False(LocatorScoring.BetterCamera(rank: 2, depth: 0, since: 1000, area: 1000, bestRank: 2, bestDepth: 1, bestSince: 0, bestArea: 0));
     }
 
     [Fact]
     public void a_depth_tie_goes_to_whichever_moved_more_recently()
     {
-        Assert.True(LocatorScoring.BetterCamera(depth: 5, since: 10, area: 1, bestDepth: 5, bestSince: 2, bestArea: 1000));
-        Assert.False(LocatorScoring.BetterCamera(depth: 5, since: 2, area: 1000, bestDepth: 5, bestSince: 10, bestArea: 1));
+        Assert.True(LocatorScoring.BetterCamera(rank: 2, depth: 5, since: 10, area: 1, bestRank: 2, bestDepth: 5, bestSince: 2, bestArea: 1000));
+        Assert.False(LocatorScoring.BetterCamera(rank: 2, depth: 5, since: 2, area: 1000, bestRank: 2, bestDepth: 5, bestSince: 10, bestArea: 1));
     }
 
     [Fact]
     public void a_depth_and_movement_tie_goes_to_the_larger_viewport()
     {
-        Assert.True(LocatorScoring.BetterCamera(depth: 5, since: 10, area: 2000, bestDepth: 5, bestSince: 10, bestArea: 1000));
-        Assert.False(LocatorScoring.BetterCamera(depth: 5, since: 10, area: 500, bestDepth: 5, bestSince: 10, bestArea: 1000));
+        Assert.True(LocatorScoring.BetterCamera(rank: 2, depth: 5, since: 10, area: 2000, bestRank: 2, bestDepth: 5, bestSince: 10, bestArea: 1000));
+        Assert.False(LocatorScoring.BetterCamera(rank: 2, depth: 5, since: 10, area: 500, bestRank: 2, bestDepth: 5, bestSince: 10, bestArea: 1000));
     }
 
     [Fact]
     public void a_full_tie_is_not_better()
     {
-        Assert.False(LocatorScoring.BetterCamera(depth: 5, since: 10, area: 100, bestDepth: 5, bestSince: 10, bestArea: 100));
+        Assert.False(LocatorScoring.BetterCamera(rank: 2, depth: 5, since: 10, area: 100, bestRank: 2, bestDepth: 5, bestSince: 10, bestArea: 100));
     }
 
     [Fact]

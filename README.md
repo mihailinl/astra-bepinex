@@ -130,14 +130,27 @@ dotnet test tests/Astra.Bridge.Core.Tests          # + ASTRA_ENGINE=<engine bina
 ```
 
 The composite shader is a Unity asset bundle, built per Unity line and platform and embedded in the
-plugins. To rebuild it (Unity 6000.3 for Unity 6 games):
+plugins: today 2021 (2021.3.35), 2022 and 6000. To rebuild one line's, with that line's editor:
 
 ```bash
-Unity -batchmode -quit -projectPath unity/AstraShaders -executeMethod BuildBundles.Build
+tools/build-bundles.sh ~/Unity/Hub/Editor/<version>/Editor/Unity
 ```
 
 A bundle loads in its own Unity line and newer ones, never older: bundles for older lines
-(2019–2022) are welcome as contributions — build the same project with that editor.
+(2019–2020) are welcome as contributions — build the same project with that editor.
+
+An IL2CPP game's build STRIPS every engine type and member it never uses, and a plugin method that
+names a stripped one fails the first time it runs. Check the IL2CPP flavour against a game's
+generated interop (metadata only, nothing runs):
+
+```bash
+dotnet run --project tools/check-game-members -- il2cpp \
+  src/Astra.BepInEx6.IL2CPP/bin/Release/net6.0/Astra.Unity.dll <game profile>/BepInEx/interop
+```
+
+Every reference it lists must be unreachable in that game (the SRP hooks in a Built-in game) or sit
+in a method whose caller catches the failure (`Sh` is the pattern: light probes, which MiSide's
+build removed).
 
 `unity/AstraTestbed` is a tiny URP game built in code (walls, a ramp, stairs, a player that walks,
 runs and jumps, a camera that whips round) to test both plugins without a real game — as a Mono and

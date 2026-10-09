@@ -122,7 +122,7 @@ namespace Astra.Unity
     {
         static Func<Camera, Compositor, bool> attach;
         static Func<Camera, float> exposure;
-        static Func<Camera, SphericalHarmonicsL2> ambient;
+        static bool ambient;
         static Func<Camera, (bool enabled, float density, Color color)> fog;
         static Camera attachedTo;
 
@@ -145,8 +145,8 @@ namespace Astra.Unity
                 Missing = null;
                 try { exposure = Adapters.Method<Func<Camera, float>>("Astra.Hdrp", "Astra.Unity.Hdrp", "Exposure"); }
                 catch (Exception) { exposure = null; } // an older adapter: lights unconverted
-                try { ambient = Adapters.Method<Func<Camera, SphericalHarmonicsL2>>("Astra.Hdrp", "Astra.Unity.Hdrp", "Ambient"); }
-                catch (Exception) { ambient = null; }
+                try { Sh.BindHdrp(); ambient = true; }
+                catch (Exception) { ambient = false; }
                 try { fog = Adapters.Method<Func<Camera, (bool, float, Color)>>("Astra.Hdrp", "Astra.Unity.Hdrp", "ReadFog"); }
                 catch (Exception) { fog = null; } // an older adapter: no HDRP fog
             }
@@ -175,19 +175,18 @@ namespace Astra.Unity
             }
         }
 
-        /// <summary>HDRP's own ambient probe for <paramref name="cam"/> (the sky's, in physical units);
-        /// null when the adapter cannot read it.</summary>
-        public static SphericalHarmonicsL2? Ambient(Camera cam)
+        /// <summary>HDRP's own ambient probe for <paramref name="cam"/> (the sky's, in physical units),
+        /// evaluated toward <paramref name="directions"/>; null when the adapter cannot read it.</summary>
+        public static Color[] Ambient(Camera cam, Vector3[] directions)
         {
-            if (ambient == null) return null;
+            if (!ambient) return null;
             try
             {
-                var sh = ambient(cam);
-                return sh == default(SphericalHarmonicsL2) ? (SphericalHarmonicsL2?)null : sh;
+                return Sh.Hdrp(cam, directions);
             }
             catch (Exception)
             {
-                ambient = null;
+                ambient = false;
                 return null;
             }
         }

@@ -3,7 +3,7 @@ schema = 1
 [integration]                      # metadata: shown to the user, never acted on
 id = "astra.unity-il2cpp"
 name = "Astra for any Unity game (IL2CPP, experimental)"
-version = "0.5.2"
+version = "0.5.3"
 authors = ["mihailinl"]
 license = "MIT"
 repo = "https://github.com/mihailinl/astra-bepinex"
@@ -54,3 +54,10 @@ proton_dll_overrides = { winhttp = "native,builtin" }
 file = "${profile}/BepInEx/config/astra.unity-foundation.cfg"
 section = "Connection"
 set = { Port = "${bridge_port}", Token = "${bridge_token}" }
+
+# BepInEx 6 opens a console window with its log by default (BepInEx 5 does not): a player sees
+# nothing to act on there, and the log is in the profile's BepInEx/LogOutput.log anyway.
+[[config_writes]]
+file = "${profile}/BepInEx/config/BepInEx.cfg"
+section = "Logging.Console"
+set = { Enabled = "false" }
