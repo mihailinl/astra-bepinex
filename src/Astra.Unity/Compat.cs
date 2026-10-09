@@ -136,10 +136,50 @@ namespace Astra.Unity
             return null;
         }
 
-        /// <summary>Every loaded object of a type, including inactive ones (filter yourself).</summary>
+        /// <summary>
+        /// Does this game's runtime have <typeparamref name="T"/> at all? An IL2CPP build strips every
+        /// engine class the game never uses; Il2CppInterop may still put the C# type back in the
+        /// interop (MiSide's TerrainCollider), but with no native class behind it every generic call
+        /// naming it — <c>TryCast</c>, <c>GetComponent</c>, <c>Il2CppType.Of</c> — throws "is not an
+        /// Il2Cpp reference type" (that stopped her in MiSide's first level). No object of a class the
+        /// game lacks can exist, so a check for one is simply false. Always true under Mono.
+        /// </summary>
+        public static bool Exists<T>() where T : UnityEngine.Object
+        {
+#if IL2CPP
+            try
+            {
+                return Il2CppClassPointerStore<T>.NativeClassPtr != IntPtr.Zero;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+#else
+            return true;
+#endif
+        }
+
+        /// <summary><c>GetComponent&lt;T&gt;</c>, null when the game has no such class (<see cref="Exists{T}"/>).</summary>
+        public static T Get<T>(GameObject go) where T : Component => go != null && Exists<T>() ? go.GetComponent<T>() : null;
+
+        /// <summary><c>TryCast</c> / <c>as</c>, null when the game has no such class (<see cref="Exists{T}"/>).</summary>
+        public static T As<T>(UnityEngine.Object o) where T : UnityEngine.Object
+        {
+            if (o == null || !Exists<T>()) return null;
+#if IL2CPP
+            return o.TryCast<T>();
+#else
+            return o as T;
+#endif
+        }
+
+        /// <summary>Every loaded object of a type, including inactive ones (filter yourself); none when
+        /// the game has no such class (<see cref="Exists{T}"/>).</summary>
         public static List<T> FindAll<T>() where T : UnityEngine.Object
         {
             var list = new List<T>();
+            if (!Exists<T>()) return list;
 #if IL2CPP
             foreach (var o in Resources.FindObjectsOfTypeAll(Il2CppType.Of<T>()))
             {
@@ -282,6 +322,7 @@ namespace Astra.Unity
         public static List<Collider> CollidersUnder(GameObject root)
         {
             var list = new List<Collider>();
+            if (root == null || !Exists<Collider>()) return list;
 #if IL2CPP
             foreach (var c in root.GetComponentsInChildren(Il2CppType.Of<Collider>(), true))
             {
@@ -347,16 +388,13 @@ namespace Astra.Unity
 
         static bool CastsShadow(Collider c)
         {
-#if IL2CPP
-            if (c.TryCast<TerrainCollider>() != null) return true;
-#else
-            if (c is TerrainCollider) return true;
-#endif
+            if (As<TerrainCollider>(c) != null) return true;
             var go = c.gameObject;
-            if (Casts(go.GetComponent<Renderer>())) return true;
+            if (Casts(Get<Renderer>(go))) return true;
 #if IL2CPP
-            foreach (var o in go.GetComponentsInChildren(Il2CppType.Of<Renderer>(), false))
-                if (Casts(o.TryCast<Renderer>())) return true;
+            if (Exists<Renderer>())
+                foreach (var o in go.GetComponentsInChildren(Il2CppType.Of<Renderer>(), false))
+                    if (Casts(o.TryCast<Renderer>())) return true;
 #else
             foreach (var r in go.GetComponentsInChildren<Renderer>(false))
                 if (Casts(r)) return true;
@@ -367,11 +405,11 @@ namespace Astra.Unity
             var at = c.transform.parent;
             for (int level = 0; level < 3 && at != null; level++)
             {
-                if (Casts(at.GetComponent<Renderer>())) return true;
+                if (Casts(Get<Renderer>(at.gameObject))) return true;
                 for (int i = 0; i < at.childCount; i++)
                 {
                     var sibling = at.GetChild(i);
-                    if (sibling != c.transform && Casts(sibling.GetComponent<Renderer>())) return true;
+                    if (sibling != c.transform && Casts(Get<Renderer>(sibling.gameObject))) return true;
                 }
                 at = at.parent;
             }
@@ -469,7 +507,7 @@ namespace Astra.Unity
         public static RenderTexture AsRenderTexture(Texture t)
         {
 #if IL2CPP
-            return t?.TryCast<RenderTexture>();
+            return t != null && Exists<RenderTexture>() ? t.TryCast<RenderTexture>() : null;
 #else
             return t as RenderTexture;
 #endif

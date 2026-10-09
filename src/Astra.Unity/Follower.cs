@@ -223,8 +223,8 @@ namespace Astra.Unity
                 if (found != player)
                 {
                     player = found;
-                    controller = found != null ? found.GetComponent<CharacterController>() : null;
-                    collider = found != null && controller == null ? found.GetComponent<Collider>() : null;
+                    controller = found != null ? Compat.Get<CharacterController>(found) : null;
+                    collider = found != null && controller == null ? Compat.Get<Collider>(found) : null;
                     Description = found != null ? $"'{found.name}' ({why})" : "the ground under the camera";
                 }
             }
@@ -293,17 +293,17 @@ namespace Astra.Unity
             for (var t = cam.transform.parent; t != null; t = t.parent)
             {
                 var go = t.gameObject;
-                if (go.GetComponent<CharacterController>() != null)
+                if (Compat.Get<CharacterController>(go) != null)
                 {
                     why = "the camera's ancestor has a CharacterController";
                     return go;
                 }
-                if (go.GetComponent<Rigidbody>() != null && go.GetComponent<Collider>() != null)
+                if (Compat.Get<Rigidbody>(go) != null && Compat.Get<Collider>(go) != null)
                 {
                     why = "the camera's ancestor has a Rigidbody + Collider";
                     return go;
                 }
-                var anim = go.GetComponent<Animator>();
+                var anim = Compat.Get<Animator>(go);
                 if (anim != null && anim.isHuman)
                 {
                     why = "the camera's ancestor has a humanoid Animator";
