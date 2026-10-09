@@ -396,7 +396,7 @@ namespace Astra.Unity
 
         public Camera Locate()
         {
-            if (ToScreen(current) && Time.unscaledTime < nextSearch) return current;
+            if (Usable(current) && Time.unscaledTime < nextSearch) return current;
             nextSearch = Time.unscaledTime + 2f;
             Camera found;
             string why;
@@ -404,7 +404,7 @@ namespace Astra.Unity
             // a URP overlay, one not rendering. An orthographic Camera.main stays (an isometric game's).
             var tagged = Camera.main;
             if (ToScreen(tagged) && Rank(tagged) > 0 && (tagged.cullingMask & ~LocatorScoring.UiLayerBit) != 0) { found = tagged; why = "Camera.main"; }
-            else { found = Best(); why = found != null && Rank(found) == 2 ? "the camera that draws the world" : "highest-depth camera with no render target"; }
+            else { found = Best(); why = found == null ? "none" : Rank(found) < 2 ? "highest-depth camera with no render target" : ToScreen(found) ? "the camera that draws the world" : "the camera that draws the world into the game's screen texture"; }
             if (found != current)
             {
                 current = found;
@@ -484,6 +484,22 @@ namespace Astra.Unity
 
         static bool ToScreen(Camera c) => c != null && c.isActiveAndEnabled && c.targetTexture == null;
 
+        /// <summary>
+        /// A camera that draws into a texture the SHAPE of the screen and at least an eighth of its
+        /// width: how a game shows its world through a texture of its own (a pixelated look — the world
+        /// at 320×180 on a UI RawImage or a quad). Not a monitor's, a mirror's or a minimap's: those
+        /// are small or square. She is drawn into that texture, and the game shows her with its world.
+        /// </summary>
+        static bool ToScreenTexture(Camera c)
+        {
+            if (c == null || !c.isActiveAndEnabled || c.targetTexture == null) return false;
+            var t = c.targetTexture;
+            float screen = (float)Screen.width / Mathf.Max(1, Screen.height), tex = (float)t.width / Mathf.Max(1, t.height);
+            return t.width * 8 >= Screen.width && Mathf.Abs(tex / screen - 1f) < 0.15f;
+        }
+
+        static bool Usable(Camera c) => ToScreen(c) || ToScreenTexture(c);
+
         Camera Best()
         {
             Camera found = null;
@@ -492,8 +508,11 @@ namespace Astra.Unity
             float now = Time.unscaledTime;
             foreach (var c in Camera.allCameras)
             {
-                if (!ToScreen(c)) continue;
-                int rank = Rank(c);
+                if (!Usable(c)) continue;
+                // A camera to the screen outranks one into a screen-shaped texture of the same kind;
+                // a texture camera that draws the world outranks a screen camera that does not (the
+                // UI camera showing that very texture).
+                int rank = Rank(c) * 2 + (ToScreen(c) ? 1 : 0);
                 float since = Track(c, now);
                 var r = c.pixelRect;
                 float area = r.width * r.height;
