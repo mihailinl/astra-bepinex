@@ -65,9 +65,8 @@ namespace Astra.Unity
             }
 
             // Follow with hysteresis: she starts when you are FollowStart away, and walks to a spot
-            // BESIDE you — on the side she is already on, a little behind; in a FIRST-PERSON game a
-            // little AHEAD instead, where you can see her (behind, she was never on screen — the
-            // owner in ULTRAKILL). Standing, she stays put however you look around.
+            // BESIDE you — on the side she is already on, a little behind. Standing, she stays put
+            // however you look around.
             if (!following && flat > s.FollowStart) following = true;
             var want = Vector3.zero;
             if (following)
@@ -76,7 +75,7 @@ namespace Astra.Unity
                 var dir = moving.magnitude > 1f ? moving.normalized : ahead;
                 var right = new Vector3(dir.z, 0, -dir.x);
                 float side = Vector3.Dot(her.Position - target, right) >= 0 ? 1 : -1;
-                var spot = target + right * (side * s.KeepDistance * 0.8f) + dir * (s.KeepDistance * (f.FirstPerson ? 0.8f : -0.6f));
+                var spot = target + right * (side * s.KeepDistance * 0.8f) - dir * (s.KeepDistance * 0.6f);
                 var toSpot = new Vector3(spot.x - her.Position.x, 0, spot.z - her.Position.z);
                 float d = toSpot.magnitude;
                 if (d < 0.25f && moving.magnitude < 0.3f) following = false;
@@ -150,7 +149,7 @@ namespace Astra.Unity
         void Teleport(FrameContext f, Vector3 target, Vector3 ahead)
         {
             var her = f.Her;
-            f.TrySpotNear(target, ahead, f.Follow.KeepDistance, f.FirstPerson, out var at);
+            f.TrySpotNear(target, ahead, f.Follow.KeepDistance, out var at);
             her.Position = at;
             her.Facing = ahead;
             her.Placed = true;

@@ -375,7 +375,14 @@ namespace Astra.Unity
             cmd.Clear();
             // Built-in binds the game's depth during the camera's own render (we switched it on).
             if (!Show || !Prepare(cam, srp: false, cam.targetTexture != null, depthTest: true, block)) return;
-            cmd.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
+            // Into what the camera is rendering into RIGHT NOW, not "its target": a game that points
+            // its camera at its own buffers with SetTargetBuffers (ULTRAKILL: colour, outline data and
+            // normals, then a second camera puts the colour on the screen through its palette and
+            // pixelation) leaves targetTexture null, and CameraTarget then drew her on the back buffer
+            // — under that second camera's full-screen picture, every frame. The active target is the
+            // camera's own (a screen camera's back buffer is the same thing as before), and the flip
+            // follows it (_ProjectionParams, set by Unity for this render).
+            cmd.SetRenderTarget(BuiltinRenderTextureType.CurrentActive);
             cmd.DrawProcedural(Matrix4x4.identity, mat, 0, MeshTopology.Triangles, 3, 1, block);
         }
 

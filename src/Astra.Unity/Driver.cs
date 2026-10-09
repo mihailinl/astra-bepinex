@@ -354,7 +354,6 @@ namespace Astra.Unity
                 ? Guarded("player", () => Checked(integration.PlayerLocator(cam)), () => defaultPlayer.Locate(cam, configured, mask))
                 : defaultPlayer.Locate(cam, configured, mask);
             IgnorePlayer(frame.Player?.Root);
-            frame.FirstPerson = frame.Player is PlayerInfo p && IsFirstPerson(cam.transform.position, p.Feet);
 
             if (integration != null)
             {
@@ -703,14 +702,6 @@ namespace Astra.Unity
         }
 
         int passMisses;
-
-        /// <summary>The camera stands at the player's eyes: within 0.75 units across of their feet,
-        /// 0.3–2.5 above them (<see cref="FrameContext.FirstPerson"/>).</summary>
-        static bool IsFirstPerson(Vector3 camera, Vector3 feet)
-        {
-            var d = camera - feet;
-            return new Vector2(d.x, d.z).magnitude < 0.75f && d.y > 0.3f && d.y < 2.5f;
-        }
 
         /// <summary>
         /// Was her composite drawn inside <paramref name="cam"/>'s own render this frame? Queued is not
