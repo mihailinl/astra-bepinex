@@ -249,6 +249,10 @@ namespace Astra.Sdk
         public Camera Camera { get; internal set; }
         /// <summary>The player this frame (null: none — a menu, a loading screen).</summary>
         public PlayerInfo? Player { get; internal set; }
+        /// <summary>The camera is the player's own eyes (a first-person game): it stands within
+        /// 0.75 units across of the player's feet, 0.3–2.5 above them. A raw fact a brain uses to keep
+        /// her where such a player can see her — ahead and to the side, never behind.</summary>
+        public bool FirstPerson { get; internal set; }
         /// <summary>Where she is; a brain writes it.</summary>
         public Her Her { get; }
         /// <summary>Her animation set's parameters beyond the two the foundation measures itself
@@ -283,14 +287,23 @@ namespace Astra.Sdk
         /// player's chest. Tried behind first, then the sides, then in front. False when there is none
         /// (a pinnacle, a narrow ledge) — never "the player's own feet".
         /// </summary>
-        public bool TrySpotNear(Vector3 feet, Vector3 forward, float distance, out Vector3 spot)
+        public bool TrySpotNear(Vector3 feet, Vector3 forward, float distance, out Vector3 spot) =>
+            TrySpotNear(feet, forward, distance, false, out spot);
+
+        /// <summary>
+        /// <see cref="TrySpotNear(Vector3, Vector3, float, out Vector3)"/>, or with
+        /// <paramref name="ahead"/> AHEAD of the player first: off to either side of where they look
+        /// (never in their line of fire), then wider, then behind — where a first-person player
+        /// sees her.
+        /// </summary>
+        public bool TrySpotNear(Vector3 feet, Vector3 forward, float distance, bool ahead, out Vector3 spot)
         {
             forward.y = 0;
             forward = forward.sqrMagnitude > 1e-6f ? forward.normalized : Vector3.forward;
             var chest = feet + Vector3.up * 1.2f;
-            foreach (float angle in SpotAngles)
+            foreach (float angle in ahead ? AheadAngles : SpotAngles)
             {
-                var dir = Quaternion.AngleAxis(angle, Vector3.up) * -forward;
+                var dir = Quaternion.AngleAxis(angle, Vector3.up) * (ahead ? forward : -forward);
                 var near = feet + dir * distance;
                 if (Raycast(chest, dir, distance, out _)) continue;
                 if (GroundBelow(near + Vector3.up * 1.5f, 3f, out var hit) && Mathf.Abs(hit.point.y - feet.y) < 1f)
@@ -304,6 +317,7 @@ namespace Astra.Sdk
         }
 
         static readonly float[] SpotAngles = { 0, 40, -40, 80, -80, 120, -120, 180 };
+        static readonly float[] AheadAngles = { 35, -35, 60, -60, 90, -90, 150, -150, 180 };
 
         /// <summary>
         /// Keep her where she stands for this frame, but obey gravity: on the ground she stays on it,

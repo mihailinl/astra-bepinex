@@ -3,7 +3,7 @@ schema = 1
 [integration]                      # metadata: shown to the user, never acted on
 id = "astra.unity-il2cpp"
 name = "Astra for any Unity game (IL2CPP, experimental)"
-version = "0.5.6"
+version = "0.5.7"
 authors = ["mihailinl"]
 license = "MIT"
 repo = "https://github.com/mihailinl/astra-bepinex"
