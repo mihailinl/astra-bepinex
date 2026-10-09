@@ -87,7 +87,7 @@ change the DEFAULTS; a value you change here always wins:
 | Follow | `GroundLayers` | *(all)* | layers she walks on and bumps into |
 | Picture | `DepthBias` / `DepthSoftness` | 0.03 / 0.02 | the depth test, in metres |
 | Picture | `ColourSpace` | `auto` | `linear`/`gamma` if she looks too dark or washed out |
-| Picture | `MaxPictureHeight` | 720 | her picture's resolution (lower until the engine crops frames to her rectangle) |
+| Picture | `MaxHeight` | 1080 | her picture's resolution (the engine's maximum; lower is cheaper until the engine crops frames to her rectangle) |
 | Picture | `SendLight` | `true` | light her with the game's sun |
 | Connection | `Port` / `Token` / `RingPath` | 25600 / — / auto | only if you changed Astra's |
 

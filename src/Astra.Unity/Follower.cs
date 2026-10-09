@@ -52,8 +52,13 @@ namespace Astra.Unity
             var toPlayer = target - her.Position;
             float flat = new Vector3(toPlayer.x, 0, toPlayer.z).magnitude;
             // Too far, stuck, or far above/below a player who STANDS (one mid-jump or mid-climb lands
-            // somewhere first — a brain that knows the game handles that).
-            if (!her.Placed || flat > s.TeleportDistance || (player.Grounded && Mathf.Abs(toPlayer.y) > 8f) || stuckTime > 2f)
+            // somewhere first — a brain that knows the game handles that); and whatever the player
+            // does, never a fall out of the world: more than the teleport distance below or above,
+            // or falling for 3 s (Extermination Ship: placed during a cutscene over nothing, she fell
+            // for 250 m under a player its own physics moves, whom a CharacterController never calls
+            // grounded).
+            if (!her.Placed || flat > s.TeleportDistance || Mathf.Abs(toPlayer.y) > s.TeleportDistance
+                || (player.Grounded && Mathf.Abs(toPlayer.y) > 8f) || stuckTime > 2f || airTime > 3f)
             {
                 Teleport(f, target, ahead);
                 return;
@@ -246,12 +251,21 @@ namespace Astra.Unity
                 Feet = feet,
                 Forward = FollowBrain.Horizontal(go.transform.forward),
                 Root = go, // the candidate's OWN hierarchy, never the scene root
-                Grounded = cc == null || cc.isGrounded,
+                // A CharacterController knows only if the game moves it with Move(); a game that
+                // moves the player otherwise (its own Rigidbody, the transform) leaves isGrounded
+                // false forever — so ground right under the feet counts too.
+                Grounded = cc == null || cc.isGrounded || GroundUnder(feet),
                 Height = height,
             };
         }
 
         static Vector3 BoundsFeet(Bounds b) => new Vector3(b.center.x, b.min.y, b.center.z);
+
+        /// <summary>Walkable ground within 0.3 m under <paramref name="feet"/> (the ray starts inside the
+        /// player's own collider, which a ray never hits).</summary>
+        static bool GroundUnder(Vector3 feet) =>
+            Physics.Raycast(feet + Vector3.up * 0.1f, Vector3.down, out var hit, 0.4f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
+            && hit.normal.y > 0.5f;
 
         static GameObject Find(Camera cam, string configured, out string why)
         {
