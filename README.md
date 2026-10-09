@@ -87,7 +87,8 @@ change the DEFAULTS; a value you change here always wins:
 | Follow | `GroundLayers` | *(all)* | layers she walks on and bumps into |
 | Picture | `DepthBias` / `DepthSoftness` | 0.03 / 0.02 | the depth test, in metres |
 | Picture | `ColourSpace` | `auto` | `linear`/`gamma` if she looks too dark or washed out |
-| Picture | `MaxHeight` | 1080 | her picture's resolution (the engine's maximum; lower is cheaper until the engine crops frames to her rectangle) |
+| Picture | `MaxHeight` | 1080 | her picture's resolution (the engine's maximum; with an engine that crops — 0.2.1+ — only her rectangle of it is copied) |
+| Picture | `BeforePostProcessing` | true | URP games on Unity 2022–2023: draw her before the game's post-processing, so its look (grading, pixelation, dithering) is on her too |
 | Picture | `SendLight` | `true` | light her with the game's sun |
 | Connection | `Port` / `Token` / `RingPath` | 25600 / — / auto | only if you changed Astra's |
 

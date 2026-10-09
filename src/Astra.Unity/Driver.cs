@@ -122,6 +122,7 @@ namespace Astra.Unity
                 srp = GraphicsSettings.currentRenderPipeline != null;
                 string pipeline = Compat.PipelineClass();
                 hdrp = srp && pipeline != null && pipeline.EndsWith(".HDRenderPipelineAsset", StringComparison.Ordinal);
+                UrpHook.BeforePost = settings.BeforePostProcessing.Value;
                 UrpHook.TryLoad();
                 HdrpHook.TryLoad();
                 if (hdrp && !HdrpHook.Active && compositor != null)
@@ -136,7 +137,9 @@ namespace Astra.Unity
                     contextEnd = Compat.HookSrpContextEnd(OnEndContext);
                 }
                 else Compat.HookBuiltIn(OnBuiltInPreCull);
-                log.LogInfo(UrpHook.Active ? $"compositing inside the camera's URP 17 render ({(UrpHook.RenderGraph ? "render graph" : "Compatibility Mode")}), after post-processing"
+                log.LogInfo(UrpHook.Active && !Application.unityVersion.StartsWith("6000.", StringComparison.Ordinal)
+                    ? "compositing inside the camera's URP render, before post-processing (the game's look is on her too)"
+                    : UrpHook.Active ? $"compositing inside the camera's URP 17 render ({(UrpHook.RenderGraph ? "render graph" : "Compatibility Mode")}), after post-processing"
                     : HdrpHook.Active ? "compositing in an HDRP custom pass, against the camera's depth buffer"
                     : $"compositing after {(contextEnd ? "the frame's cameras" : "the camera")} ({(hdrp ? HdrpHook.Missing : UrpHook.Missing)})");
                 log.LogInfo($"{Application.productName} (Unity {Application.unityVersion}, {SystemInfo.graphicsDeviceType}, " +
@@ -288,6 +291,9 @@ namespace Astra.Unity
                     // Her shadow here is the game's own, cast by her caster: the engine need not make
                     // her view from the sun (and makes neither when shadows are off).
                     link.Shadow = settings.Shadows.Value ? "caster" : "none";
+                    // Only her rectangle of each picture (flag 128), where this game can copy between
+                    // textures on the GPU — a few hundred KB a frame on the main thread, not ~16 MB.
+                    link.Crop = Picture.CanTakeCropped;
                     link.Game = integration?.Game ?? Application.productName;
                     link.Foundation = AstraSdk.Version;
                     link.Integration = integration?.Id;
@@ -584,6 +590,9 @@ namespace Astra.Unity
                 else extraInGraph.Remove(cam.GetInstanceID());
                 return;
             }
+            // Nothing is queued into the main camera this frame until the end of this method says so:
+            // a frame that returns early (no link) must not leave the last frame's "queued" standing.
+            if (cam == main) inGraph = false;
             if (faulted || cam != main || link == null || !link.Ready) return;
             Fenced("send", () =>
             {
@@ -673,13 +682,13 @@ namespace Astra.Unity
 
         void OnEndCamera(Camera cam)
         {
-            if (!faulted && cam != main && compositor != null && !hdrp && !extraInGraph.Contains(cam.GetInstanceID()) && IsExtraKnown(cam))
+            if (!faulted && cam != main && compositor != null && !hdrp && !(extraInGraph.Contains(cam.GetInstanceID()) && PassRan(cam)) && IsExtraKnown(cam))
             {
                 // Right after the camera, against its own depth texture (no stack to blit over her).
                 DrawAfterCamera(cam);
                 return;
             }
-            if (faulted || cam != main || compositor == null || inGraph) return;
+            if (faulted || cam != main || compositor == null || RanInGraph(cam)) return;
             // Where the SRP reports the end of the whole context, draw THERE: a camera stack's final
             // blit (the last overlay camera's) would otherwise copy over her.
             if (contextEnd)
@@ -692,6 +701,39 @@ namespace Astra.Unity
             DrawAfterCamera(cam);
         }
 
+        int passMisses;
+
+        /// <summary>
+        /// Was her composite drawn inside <paramref name="cam"/>'s own render this frame? Queued is not
+        /// drawn for the URP 2022–2023 adapter: a reflection camera rendered inside the main camera's
+        /// begin can empty the renderer's queue, and a URP 16 render graph never calls a plain pass —
+        /// then she is composited after the camera this frame, and after 120 frames running the
+        /// adapter stands down for good (logged once). The other adapters ran when queued.
+        /// </summary>
+        bool RanInGraph(Camera cam)
+        {
+            if (!inGraph) return false;
+            if (PassRan(cam))
+            {
+                passMisses = 0;
+                return true;
+            }
+            if (++passMisses > 120 && UrpHook.Active)
+            {
+                UrpHook.StandDown("her pass was queued but never ran in the camera for 120 frames");
+                log.LogWarning($"compositing after the camera: {UrpHook.Missing}");
+            }
+            return false;
+        }
+
+        /// <summary>Did her queued pass run for <paramref name="cam"/> this frame? Always, for the
+        /// adapters whose queued pass runs (HDRP, URP 17); for the URP 2022–2023 one, only if it
+        /// stamped this frame and this camera (an extra camera's end comes right after its own render,
+        /// before another camera's pass could stamp over it).</summary>
+        bool PassRan(Camera cam) =>
+            hdrp || !UrpHook.BeforePostAdapter
+            || (compositor.PassFrame == Time.frameCount && compositor.PassCamera == cam.GetInstanceID());
+
         bool IsExtraKnown(Camera cam) =>
             integration?.ExtraCamera != null && her.Placed && link != null && link.Ready
             && extraCameras.TryGetValue(cam.GetInstanceID(), out bool yes) && yes;
@@ -700,7 +742,7 @@ namespace Astra.Unity
         {
             if (!mainRendered) return;
             mainRendered = false;
-            if (faulted || main == null || compositor == null || inGraph) return;
+            if (faulted || main == null || compositor == null) return;
             DrawAfterCamera(main, keptDepth: true);
         }
 

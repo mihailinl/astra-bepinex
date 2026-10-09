@@ -217,11 +217,24 @@ namespace Astra.Bridge
         /// <paramref name="client"/>'s part after the last <c>/</c>).</param>
         /// <param name="foundation">This foundation's version; null = not said.</param>
         /// <param name="integration">The game's integration id, when one is registered; null = none.</param>
-        public static string Hello(string client, string token, string shadow, string game, string foundation, string integration)
+        public static string Hello(string client, string token, string shadow, string game, string foundation, string integration) =>
+            Hello(client, token, shadow, game, foundation, integration, false);
+
+        /// <param name="client">Who is asking (a log line on the engine's side).</param>
+        /// <param name="token">The engine's bridge token, if it has one.</param>
+        /// <param name="shadow">Which of her shadows the game reads (see the overloads above).</param>
+        /// <param name="game">The game's display name; null = not said.</param>
+        /// <param name="foundation">This foundation's version; null = not said.</param>
+        /// <param name="integration">The game's integration id, when one is registered; null = none.</param>
+        /// <param name="crop">Ask for her RECTANGLE of each picture only (flag 128): a few hundred KB a
+        /// frame instead of the whole picture. An engine without the <c>crop</c> cap ignores it, so a
+        /// reader checks <see cref="FrameRing.FlagCrop"/> on every frame.</param>
+        public static string Hello(string client, string token, string shadow, string game, string foundation, string integration, bool crop)
         {
             var w = Begin("hello").Num("v", ProtocolVersion).Str("client", client ?? "unknown");
             if (!string.IsNullOrEmpty(token)) w.Str("token", token);
             if (!string.IsNullOrEmpty(shadow)) w.Str("shadow", shadow);
+            if (crop) w.Bool("crop", true);
             if (!string.IsNullOrEmpty(game)) w.Str("game", game);
             if (!string.IsNullOrEmpty(foundation)) w.Str("foundation", foundation);
             if (!string.IsNullOrEmpty(integration)) w.Str("integration", integration);

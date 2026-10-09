@@ -44,7 +44,7 @@ namespace Astra.Unity
         /// <summary>One view's picture: two textures, the frame they hold, the newest frame seen.</summary>
         sealed class View
         {
-            public Texture2D Colour, Depth;
+            public readonly Picture Picture = new Picture();
             public RingFrame Shown;
             public bool Have;
             public long Seen;
@@ -230,27 +230,14 @@ namespace Astra.Unity
                 v.Have = false;
                 return v;
             }
-            bool fresh = v.Colour == null || v.Colour.width != f.Width || v.Colour.height != f.Height;
-            if (fresh)
-            {
-                Release(v);
-                v.Colour = new Texture2D(f.Width, f.Height, TextureFormat.RGBA32, false, true)
-                {
-                    name = $"Astra colour {view}", filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.HideAndDontSave,
-                };
-                v.Depth = new Texture2D(f.Width, f.Height, TextureFormat.RFloat, false, true)
-                {
-                    name = $"Astra depth {view}", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.HideAndDontSave,
-                };
-            }
-            v.Colour.LoadRawTextureData(f.Colour, f.PlaneBytes);
-            v.Depth.LoadRawTextureData(f.Depth, f.PlaneBytes);
             if (view == 0 && Time.unscaledTime >= nextCoverage)
             {
                 nextCoverage = Time.unscaledTime + 5f;
-                Coverage = AlphaShare(f.Colour, f.PlaneBytes);
+                // A cropped frame's planes are her rectangle: its share, scaled to the whole view.
+                float share = f.PlaneBytes > 0 ? AlphaShare(f.Colour, f.PlaneBytes) : 0;
+                Coverage = f.Cropped ? share * f.CropW * f.CropH / ((float)f.Width * f.Height) : share;
             }
-            if (!Ring.StillValid(ref f))
+            if (!v.Picture.Load(Ring, ref f, view, out bool fresh))
             {
                 // The engine reused the slot while we copied: this copy is torn and is never applied.
                 // The GPU still holds the last whole picture, so it goes on showing — unless the
@@ -258,8 +245,6 @@ namespace Astra.Unity
                 if (fresh) v.Have = false;
                 return v;
             }
-            v.Colour.Apply(false, false);
-            v.Depth.Apply(false, false);
             Pictures++;
             v.Shown = f;
             v.Have = true;
@@ -418,16 +403,24 @@ namespace Astra.Unity
         /// <param name="into">The draw's property block.</param>
         public bool PrepareForPass(Camera cam, bool intoTexture, MaterialPropertyBlock into)
         {
+            PassFrame = Time.frameCount;
+            PassCamera = cam != null ? cam.GetInstanceID() : 0;
             // An adapter's pass may outlive the foundation (stood down after a fault): draw nothing then.
             return !disposed && Show && Prepare(cam, srp: true, intoTexture, depthTest: true, into);
         }
+
+        /// <summary>The frame and the camera an adapter's pass last ran for — so a queued pass the
+        /// pipeline never ran (a reflection camera's render emptied the queue, a render graph that calls
+        /// no Execute) is noticed and she is composited the old way instead of not at all.</summary>
+        public int PassFrame = -1, PassCamera;
 
         /// <summary>Put everything the pass reads for <paramref name="cam"/> in <paramref name="b"/>;
         /// false when there is nothing to show.</summary>
         bool Prepare(Camera cam, bool srp, bool intoTexture, bool depthTest, MaterialPropertyBlock b)
         {
             var s = settings;
-            if (disposed || Ring == null || !Pick(cam, out var v, out var then)) return false;
+            // A cropped frame with nothing of her in this view: no draw at all.
+            if (disposed || Ring == null || !Pick(cam, out var v, out var then) || v.Picture.Empty) return false;
             b.Clear(); // nothing an earlier draw set (a kept depth) may leak into this one
 
             // The present view's axes. A mirror's camera renders the proper view flipped left to
@@ -451,9 +444,10 @@ namespace Astra.Unity
             bool gl = SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore || SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3;
             b.SetVector(IdZNdc, gl ? new Vector4(2, -1, 0, 0) : new Vector4(1, 0, 0, 0)); // depth texel → NDC z
             b.SetVector(IdTanThen, new Vector4(then.TanX, then.TanY, 0, 0));
-            b.SetVector(IdSize, new Vector4(v.Colour.width, v.Colour.height, 1f / v.Colour.width, 1f / v.Colour.height));
-            b.SetTexture(IdColour, v.Colour);
-            b.SetTexture(IdDepth, v.Depth);
+            var pic = v.Picture;
+            b.SetVector(IdSize, new Vector4(pic.Colour.width, pic.Colour.height, 1f / pic.Colour.width, 1f / pic.Colour.height));
+            b.SetTexture(IdColour, pic.Colour);
+            b.SetTexture(IdDepth, pic.Depth);
             b.SetVector(IdTest, new Vector4(depthTest ? 1 : 0, s.DepthBias.Value, s.DepthSoftness.Value, 0));
             // Which way up the target is: an SRP's pass gets it worked out here; inside a Built-in
             // camera, 0 = "ask _ProjectionParams", which Unity sets for that target.
@@ -475,9 +469,7 @@ namespace Astra.Unity
 
         static void Release(View v)
         {
-            if (v.Colour != null) UnityEngine.Object.Destroy(v.Colour);
-            if (v.Depth != null) UnityEngine.Object.Destroy(v.Depth);
-            v.Colour = v.Depth = null;
+            v.Picture.Release();
         }
 
         public void Dispose()

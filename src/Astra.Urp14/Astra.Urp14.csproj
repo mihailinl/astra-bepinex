@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Her composite pass for URP 13–16 (Unity 2022.1–2023), inside the camera's render BEFORE its
+       post-processing. Compiled against a URP 14 game's own assemblies, which ship with no NuGet
+       package and never go into the build's output: UrpRefDir points at a Unity 2022.3 URP game's
+       <Game>_Data/Managed (read-only). -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>Astra.Urp14</AssemblyName>
+    <RootNamespace>Astra.Unity</RootNamespace>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(UrpRefDir)/UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="$(UrpRefDir)/Unity.RenderPipelines.Universal.Runtime.dll" Private="false" />
+    <Reference Include="$(UrpRefDir)/Unity.RenderPipelines.Core.Runtime.dll" Private="false" />
+    <ProjectReference Include="../Astra.BepInEx5/Astra.BepInEx5.csproj" Private="false" />
+  </ItemGroup>
+</Project>

@@ -3,13 +3,14 @@
 # per-game integration (docs/GAME-INTEGRATION-MANIFEST.md §3, the engine-target form). Built LOCALLY:
 # the foundation's HDRP adapter compiles against HDRP's own assemblies, which never go into CI.
 #
-# Usage: HDRP_REF_DIR=<an HDRP game's *_Data/Managed> tools/make-runner-gi.sh
+# Usage: HDRP_REF_DIR=<an HDRP game's *_Data/Managed> URP14_REF_DIR=<a Unity 2022.3 URP game's *_Data/Managed> tools/make-runner-gi.sh
 #   BEPINEX_DIST=<dir>  an unpacked BepInEx_win_x64_5.4.23.5.zip (default: fetched and verified here)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BEPINEX_URL=https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.5/BepInEx_win_x64_5.4.23.5.zip
 BEPINEX_SHA256=82f9878551030f54657792c0740d9d51a09500eeae1fba21106b0c441e6732c4
 [ -n "${HDRP_REF_DIR:-}" ] || { echo "make-runner-gi.sh: set HDRP_REF_DIR (the runner must carry its HDRP adapter)" >&2; exit 1; }
+[ -n "${URP14_REF_DIR:-}" ] || { echo "make-runner-gi.sh: set URP14_REF_DIR (the runner must carry its URP 2022 adapter)" >&2; exit 1; }
 bash tools/pack.sh >/dev/null
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 if [ -z "${BEPINEX_DIST:-}" ]; then

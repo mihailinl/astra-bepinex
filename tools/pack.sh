@@ -9,6 +9,16 @@ cd "$(dirname "$0")/.."
 INTEROP=${1:-}
 dotnet build src/Astra.BepInEx5 -c Release -v q
 dotnet build src/Astra.Urp17 -c Release -v q
+# The URP 14 adapter (Unity 2022-2023: drawn before post-processing) compiles against a URP 14 game's
+# own assemblies: URP14_REF_DIR=<a Unity 2022.3 URP game's *_Data/Managed>. Without it the foundation
+# ships without one and draws such games over the finished frame.
+URP14=""
+if [ -n "${URP14_REF_DIR:-}" ]; then
+  dotnet build src/Astra.Urp14 -c Release -v q -p:UrpRefDir="$URP14_REF_DIR"
+  URP14=src/Astra.Urp14/bin/Release/netstandard2.1/Astra.Urp14.dll
+else
+  echo "warning: no URP 14 references (URP14_REF_DIR): the foundation ships without its URP 2022 adapter" >&2
+fi
 HDRP=""
 if [ -n "${HDRP_REF_DIR:-}" ] || [ -d unity/AstraTestbedHdrp/Library/ScriptAssemblies ]; then
   # Two statements, not `build && HDRP=…`: set -e ignores a failure on the left of && and the
@@ -33,6 +43,7 @@ for flavour in mono il2cpp; do
     src=src/Astra.BepInEx5/bin/Release/netstandard2.0
     cp src/Astra.Urp17/bin/Release/netstandard2.1/Astra.Urp17.dll "$out/"
     [ -n "$HDRP" ] && cp "$HDRP" "$out/"
+    [ -n "$URP14" ] && cp "$URP14" "$out/"
   else
     src=src/Astra.BepInEx6.IL2CPP/bin/Release/net6.0
   fi

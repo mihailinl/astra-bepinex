@@ -48,13 +48,29 @@ namespace Astra.Unity
 
         public static bool Active => enqueue != null;
 
+        /// <summary>The player's <c>Picture.BeforePostProcessing</c>: on URP 2022–2023, draw her inside
+        /// the camera before its post-processing (set before <see cref="TryLoad"/>).</summary>
+        public static bool BeforePost { get; set; } = true;
+
         /// <summary>Does URP run its render graph (false: Compatibility Mode)? For the log.</summary>
         public static bool RenderGraph { get; private set; }
+
+        /// <summary>The adapter loaded is the URP 2022–2023 one (before post-processing): a queued
+        /// pass is checked for having RUN (<c>Driver.RanInGraph</c>).</summary>
+        public static bool BeforePostAdapter { get; private set; }
+
+        /// <summary>Drop the adapter for the rest of the run; she is composited after the camera.</summary>
+        public static void StandDown(string why)
+        {
+            enqueue = null;
+            Missing = why;
+        }
 
         public static void TryLoad()
         {
             enqueue = null;
             postExposure = null;
+            BeforePostAdapter = false;
             if (Adapters.PipelineName != "UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset")
             {
                 Missing = "not a URP game";
@@ -62,7 +78,27 @@ namespace Astra.Unity
             }
             if (!Application.unityVersion.StartsWith("6000.", StringComparison.Ordinal))
             {
-                Missing = $"URP on Unity {Application.unityVersion}: its depth texture outlives the camera, no adapter needed";
+                // URP 13–16 (Unity 2022–2023): her pass goes into the camera's render BEFORE its
+                // post-processing, so the game's look (grading, a stylised game's pixelation) is on
+                // her too — unless the player keeps her over the finished frame (BeforePostProcessing
+                // off), or the adapter does not bind (URP 12 and older: no RTHandle targets), where
+                // she is composited after the frame's cameras as before: its depth texture outlives
+                // the camera.
+                if (!BeforePost || !(Application.unityVersion.StartsWith("2022.", StringComparison.Ordinal) || Application.unityVersion.StartsWith("2023.", StringComparison.Ordinal)))
+                {
+                    Missing = $"URP on Unity {Application.unityVersion}: drawn over the finished frame (its depth texture outlives the camera)";
+                    return;
+                }
+                try
+                {
+                    enqueue = Adapters.Method<Func<Camera, Compositor, bool>>("Astra.Urp14", "Astra.Unity.Urp14", "Enqueue");
+                    Missing = null;
+                    BeforePostAdapter = true;
+                }
+                catch (Exception e)
+                {
+                    Missing = $"the URP 14 adapter did not load ({e.GetType().Name}: {e.Message}): drawn over the finished frame";
+                }
                 return;
             }
             try
@@ -89,7 +125,7 @@ namespace Astra.Unity
             }
             catch (Exception e)
             {
-                Missing = $"the URP 17 adapter failed ({e.GetType().Name}: {e.Message})";
+                Missing = $"the URP adapter failed ({e.GetType().Name}: {e.Message})";
                 enqueue = null;
                 return false;
             }

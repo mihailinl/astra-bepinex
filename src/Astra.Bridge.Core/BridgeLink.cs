@@ -96,6 +96,10 @@ namespace Astra.Bridge
         /// null = not said. Read fresh on every (re)connect, like <see cref="Game"/>.</summary>
         public string Shadow { get; set; }
 
+        /// <summary>Ask for her rectangle of each picture only (<c>hello.crop</c>, flag 128). Read fresh
+        /// on every (re)connect.</summary>
+        public bool Crop { get; set; }
+
         /// <summary>This game's display name (<c>hello.game</c>); null = not said (the engine derives
         /// one from <see cref="client"/>). Read fresh on every (re)connect.</summary>
         public string Game { get; set; }
@@ -170,7 +174,7 @@ namespace Astra.Bridge
                     ws = socket;
                     loggedErrors.Clear(); // a new connection: an engine error is worth saying again
                     LastError = null;
-                    if (!socket.SendText(Messages.Hello(client, token, EffectiveShadow(), Game, Foundation, Integration)))
+                    if (!socket.SendText(Messages.Hello(client, token, EffectiveShadow(), Game, Foundation, Integration, Crop)))
                         throw new IOException("closed before hello");
                     State($"connected to Astra on {host}:{port}");
                     while (true)

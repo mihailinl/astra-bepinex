@@ -30,6 +30,7 @@ namespace Astra.Unity
         public ConfigEntry<float> DepthSoftness;
         public ConfigEntry<string> ColourSpace;
         public ConfigEntry<int> MaxPictureHeight;
+        public ConfigEntry<bool> BeforePostProcessing;
         public ConfigEntry<bool> SendLight;
         public ConfigEntry<bool> Shadows;
 
@@ -73,6 +74,8 @@ namespace Astra.Unity
                 // NEW key, so a profile's saved 720 stops applying. Each frame she is in is copied on
                 // the game's main thread until the engine crops to her bounding rect (H4).
                 MaxPictureHeight = c.Bind("Picture", "MaxHeight", 1080, "Her picture's height at most (the game's aspect is kept). Lower = cheaper."),
+                BeforePostProcessing = c.Bind("Picture", "BeforePostProcessing", true,
+                    "URP games on Unity 2022-2023: draw her before the game's post-processing, so its look (colour grading, pixelation, dithering) is on her too. Off = over the finished frame."),
                 SendLight = c.Bind("Picture", "SendLight", true, "Light her with this game's sun and sky."),
                 Shadows = c.Bind("Picture", "Shadows", true,
                     "Let this game's own lights cast her shadow (a copy of her body that only casts shadows, never drawn)."),

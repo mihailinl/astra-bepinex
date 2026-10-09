@@ -74,6 +74,12 @@ namespace Astra.Bridge
         public SunView Sun;
         public bool HasCaster;
         public CasterView Caster;
+        /// <summary>The planes are her RECTANGLE of the Width×Height picture only (flag 128 — the game
+        /// asked with <c>hello.crop</c>): <see cref="Colour"/>/<see cref="Depth"/> are CropW×CropH,
+        /// placed at (CropX, CropY), rows top-down. An empty rectangle = nothing of her in this view;
+        /// outside it she is transparent.</summary>
+        public bool Cropped;
+        public int CropX, CropY, CropW, CropH;
     }
 
     /// <summary>
@@ -86,7 +92,7 @@ namespace Astra.Bridge
     public sealed unsafe class FrameRing : IDisposable
     {
         public const uint Magic = 0x5450434D; // 'M','C','P','T'
-        public const uint FlagDepthNdc = 1, FlagBottomUp = 2, FlagReversedZ = 4, FlagLinearDepth = 8, FlagNoPlane3 = 16, FlagSunView = 32, FlagCaster = 64;
+        public const uint FlagDepthNdc = 1, FlagBottomUp = 2, FlagReversedZ = 4, FlagLinearDepth = 8, FlagNoPlane3 = 16, FlagSunView = 32, FlagCaster = 64, FlagCrop = 128;
         const uint SunMagic = 0x564E5553; // 'S','U','N','V'
         const int SunHeader = 128;
         const uint CasterMagic = 0x54534143; // 'C','A','S','T'
@@ -196,6 +202,18 @@ namespace Astra.Bridge
             f.CaptureNs = *(long*)(d + 88);
             f.PublishNs = *(long*)(d + 96);
             f.Number = *(long*)(d + 104);
+            if ((f.Flags & FlagCrop) != 0)
+            {
+                int cx = *(ushort*)(d + 116), cy = *(ushort*)(d + 118), cw = *(ushort*)(d + 120), ch = *(ushort*)(d + 122);
+                if (cx + cw > w || cy + ch > h) return false;
+                f.Cropped = true;
+                f.CropX = cx;
+                f.CropY = cy;
+                f.CropW = cw;
+                f.CropH = ch;
+                plane = 4L * cw * ch;
+            }
+            if (2 * plane > stride) return false;
             f.Colour = (IntPtr)data;
             f.Depth = (IntPtr)(data + plane);
             f.PlaneBytes = (int)plane;
