@@ -58,6 +58,7 @@ working reference, with every type and member and a whole example, is
 | `UsePlayer` → `PlayerInfo`: who she follows (feet, facing, root, grounded, height) | the object the config names, else the nearest tagged `Player`, else the ground under the camera | the game's local player (in multiplayer, YOU) |
 | `UseBrain` → `IBrain`: where she stands and how she gets there, each frame | the follower: keeps beside you, walls, steps, falls, teleports when far (`FrameContext.Default`) | climbing, swimming, a seat in a vehicle (`Her.Anchor = "hips"` + `Cues.Play("seat")`) |
 | `OnFrame` → `FrameContext.Params`: animator facts | `speed` (measured from her motion), `airborne` (`Her.Airborne`) | anything her animation set declares (`climbing`, `altitude`, `underwater`) |
+| `DeclareParam`: the facts it sends, by name and type | `speed`, `airborne` | each parameter `OnFrame` sends: said in the hello (`hello.params`) so Astra shows the player what this game sends |
 | `Cues`: animation by name | none | `Play("wave")` on a game event, `Trigger("music_fast")` |
 | `UseSun`: her sun | the scene's sun, else its brightest directional light | a game with its own day cycle or lights |
 | `UseLook`: the band her light is held in | the engine's (floor 0.20, ceiling 1.40) | a game darker or brighter than most (Lethal Company: floor 0.10) |

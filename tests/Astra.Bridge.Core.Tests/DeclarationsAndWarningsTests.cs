@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: MIT
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Astra.Bridge;
+using Xunit;
+
+/// <summary>
+/// <c>hello.params</c> (the raw parameters a game declares) and the engine's <c>warn</c> messages, as
+/// PROTOCOL.md specifies them: what the foundation writes, and what it prints.
+/// </summary>
+public class DeclarationsAndWarningsTests
+{
+    static readonly string[] Warn = { "warn" };
+
+    [Fact]
+    public void the_hello_lists_its_caps_and_its_parameters_in_order()
+    {
+        var declared = new[] { ParamDecl.Speed, ParamDecl.Airborne, new ParamDecl("climbing", ParamType.Bool) };
+        Assert.Equal(
+            "{\"t\":\"hello\",\"v\":1,\"client\":\"g\",\"integration\":\"astra.g\",\"caps\":[\"warn\"],"
+            + "\"params\":[{\"name\":\"speed\",\"type\":\"float\"},{\"name\":\"airborne\",\"type\":\"bool\"},{\"name\":\"climbing\",\"type\":\"bool\"}]}",
+            Messages.Hello("g", null, null, null, null, "astra.g", false, declared, Warn));
+    }
+
+    /// <summary>Null is "not said" (no field); an empty list is "I send none" (an empty field).</summary>
+    [Fact]
+    public void no_list_says_nothing_and_an_empty_list_says_none()
+    {
+        Assert.Equal("{\"t\":\"hello\",\"v\":1,\"client\":\"g\"}", Messages.Hello("g", null, null, null, null, null, false, null, null));
+        Assert.Equal("{\"t\":\"hello\",\"v\":1,\"client\":\"g\",\"params\":[]}",
+            Messages.Hello("g", null, null, null, null, null, false, new ParamDecl[0], new string[0]));
+    }
+
+    /// <summary>What the engine would set aside never leaves: a bad name, a repeated one, any past the 64th.</summary>
+    [Fact]
+    public void the_hello_leaves_out_what_the_engine_would_refuse()
+    {
+        var list = new List<ParamDecl>
+        {
+            new ParamDecl("ok", ParamType.Bool), new ParamDecl("1x", ParamType.Bool), new ParamDecl("a b", ParamType.Float),
+            new ParamDecl(null, ParamType.Float), new ParamDecl("ok", ParamType.Float), new ParamDecl(new string('x', 33), ParamType.Float),
+        };
+        Assert.Equal("{\"t\":\"hello\",\"v\":1,\"client\":\"g\",\"params\":[{\"name\":\"ok\",\"type\":\"bool\"}]}",
+            Messages.Hello("g", null, null, null, null, null, false, list, null));
+
+        var many = Enumerable.Range(0, 70).Select(i => new ParamDecl("p" + i, ParamType.Float)).ToList();
+        var hello = Messages.Hello("g", null, null, null, null, null, false, many, null);
+        Assert.Equal(ParamDeclarations.MaxCount, hello.Split("\"name\"").Length - 1);
+        Assert.Contains("\"p63\"", hello);
+        Assert.DoesNotContain("\"p64\"", hello);
+    }
+
+    [Theory]
+    [InlineData("climbing", true)]
+    [InlineData("_x9", true)]
+    [InlineData("in_ship", true)]
+    [InlineData("abcdefghijabcdefghijabcdefghij12", true)] // 32
+    [InlineData("abcdefghijabcdefghijabcdefghij123", false)] // 33
+    [InlineData("9lives", false)]
+    [InlineData("a-b", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    [InlineData("café", false)]
+    public void a_parameter_name_is_an_ascii_identifier_of_at_most_32(string name, bool valid) =>
+        Assert.Equal(valid, ParamDecl.ValidName(name));
+
+    [Fact]
+    public void declarations_keep_the_measured_ones_first_and_each_name_once()
+    {
+        var d = new ParamDeclarations(ParamDecl.Speed, ParamDecl.Airborne);
+        d.Declare("climbing", ParamType.Bool);
+        d.Declare("depth", ParamType.Float);
+        d.Declare("climbing", ParamType.Bool); // again, the same: nothing
+        Assert.Equal(new[] { "speed", "airborne", "climbing", "depth" }, d.ToArray().Select(p => p.Name));
+        Assert.Equal(new[] { ParamType.Float, ParamType.Bool, ParamType.Bool, ParamType.Float }, d.ToArray().Select(p => p.Type));
+    }
+
+    [Fact]
+    public void a_wrong_declaration_throws_and_changes_nothing()
+    {
+        var d = new ParamDeclarations(ParamDecl.Speed, ParamDecl.Airborne);
+        d.Declare("climbing", ParamType.Bool);
+        Assert.Throws<ArgumentException>(() => d.Declare("not a name", ParamType.Bool));
+        Assert.Throws<ArgumentException>(() => d.Declare("speed", ParamType.Float)); // the foundation's own
+        Assert.Throws<ArgumentException>(() => d.Declare("climbing", ParamType.Float)); // the other type
+        Assert.Throws<ArgumentException>(() => d.Declare("x", (ParamType)7));
+        Assert.Equal(3, d.Count);
+
+        for (int i = d.Count; i < ParamDeclarations.MaxCount; i++) d.Declare("p" + i, ParamType.Float);
+        Assert.Throws<ArgumentException>(() => d.Declare("one_too_many", ParamType.Float));
+        Assert.Equal(ParamDeclarations.MaxCount, d.Count);
+    }
+
+    /// <summary>A copy: what the link thread holds never changes under it.</summary>
+    [Fact]
+    public void declarations_hand_out_a_copy()
+    {
+        var d = new ParamDeclarations();
+        d.Declare("a", ParamType.Bool);
+        var handed = d.ToArray();
+        d.Declare("b", ParamType.Bool);
+        Assert.Single(handed);
+        Assert.Equal(2, d.ToArray().Length);
+    }
+
+    [Fact]
+    public void each_warning_is_said_once_in_plain_words()
+    {
+        var log = new WarnLog();
+        var first = log.Admit("param_undeclared", "climbing", null);
+        Assert.Contains("does not declare the parameter 'climbing'", first);
+        Assert.Null(log.Admit("param_undeclared", "climbing", null));
+        Assert.Contains("'depth'", log.Admit("param_undeclared", "depth", null));
+        Assert.Contains("no state 'seat'", log.Admit("state_unknown", "seat", null));
+        Assert.Contains("'wave' is for an animation set she is not wearing", log.Admit("cue_wrong_pack", "wave", null));
+        Assert.Equal("Astra warns: the clip 'c.vrma' was refused: capture is off",
+            log.Admit("clip_refused", "c.vrma", "capture is off"));
+        Assert.Equal("Astra warns (new_code): 'x'", log.Admit("new_code", "x", ""));
+        Assert.Equal("Astra warns (unknown): 'y'", log.Admit(null, "y", null));
+    }
+
+    [Fact]
+    public void what_the_engine_echoes_is_cut_and_made_printable()
+    {
+        var log = new WarnLog();
+        var line = log.Admit("param_undeclared", "a\nb\u202Ec" + new string('z', 100), null);
+        Assert.False(line.IndexOf('\n') >= 0);
+        Assert.False(line.IndexOf('\u202E') >= 0); // ordinal: a culture comparison ignores it
+        Assert.Contains("'abc" + new string('z', 61) + "'", line); // 64 characters kept
+        var why = log.Admit("clip_refused", "f", new string('w', 300));
+        Assert.EndsWith(": " + new string('w', 200), why);
+    }
+
+    [Fact]
+    public void past_the_budget_one_line_says_the_rest_are_not_shown()
+    {
+        var log = new WarnLog();
+        for (int i = 0; i < WarnLog.Max; i++) Assert.NotNull(log.Admit("param_undeclared", "p" + i, null));
+        Assert.Contains("the rest are not shown", log.Admit("param_undeclared", "more", null));
+        Assert.Null(log.Admit("param_undeclared", "even_more", null));
+        Assert.Null(log.Admit("param_undeclared", "p0", null));
+    }
+}

@@ -243,6 +243,7 @@ namespace Astra.Unity
                     link = new BridgeLink("astra-unity/" + Application.productName, settings.Port.Value,
                         string.IsNullOrEmpty(settings.Token.Value) ? null : settings.Token.Value);
                     link.Log = m => log.LogInfo(m);
+                    link.Warn = m => log.LogWarning(m);
                     // Her shadow here is the game's own, cast by her caster: the engine need not make
                     // her view from the sun (and makes neither when shadows are off).
                     link.Shadow = settings.Shadows.Value ? "caster" : "none";
@@ -252,6 +253,9 @@ namespace Astra.Unity
                     link.Game = integration?.Game ?? Application.productName;
                     link.Foundation = AstraSdk.Version;
                     link.Integration = integration?.Id;
+                    // What it sends, for Astra to show the player: only with an integration (the engine
+                    // keeps the list per integration id, and nothing without one).
+                    link.Params = integration?.Declared.ToArray();
                     ringSession = 0;
                     link.Start();
                 }

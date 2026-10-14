@@ -90,6 +90,8 @@ namespace Astra.Sdk
         internal Func<Light> Sun;
         internal float? LookFloor, LookCeiling;
         internal readonly List<Action<FrameContext>> FrameHandlers = new List<Action<FrameContext>>();
+        /// <summary>What this game sends: the foundation's measured two, then <see cref="DeclareParam"/>'s.</summary>
+        internal readonly ParamDeclarations Declared = new ParamDeclarations(ParamDecl.Speed, ParamDecl.Airborne);
 
         internal GameIntegration(string id, string game)
         {
@@ -180,6 +182,22 @@ namespace Astra.Sdk
         public GameIntegration OnFrame(Action<FrameContext> handler)
         {
             FrameHandlers.Add(handler);
+            return this;
+        }
+
+        /// <summary>
+        /// Declare a raw parameter this integration sends in <see cref="FrameContext.Params"/>: its name
+        /// and type. The foundation says the list to Astra when the game connects (<c>hello.params</c>),
+        /// and Astra keeps it for this integration, so the player sees what the game sends before ever
+        /// starting it, and can make her react to it. Declare every parameter you send, once, where you
+        /// register. <c>speed</c> and <c>airborne</c> are the foundation's own, declared for you.
+        /// </summary>
+        /// <exception cref="ArgumentException">The name is not a parameter name (a letter or <c>_</c>,
+        /// then letters, digits or <c>_</c>, at most 32 characters), is one of the foundation's own, was
+        /// declared with the other type, or is past the 64th.</exception>
+        public GameIntegration DeclareParam(string name, ParamType type)
+        {
+            Declared.Declare(name, type);
             return this;
         }
     }

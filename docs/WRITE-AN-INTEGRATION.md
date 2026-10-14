@@ -37,7 +37,7 @@ Write an integration when the game needs knowledge only code can have:
 | The camera she is drawn into is wrong (an untagged camera, a spectator or vehicle camera). | `UseCamera` |
 | She is too small or too big for this world. | `Defaults.Scale` or `Defaults.MatchPlayerHeight` |
 | Where she stands needs the game's rules: you climb, swim, drive. | `UseBrain` |
-| The game has states her animations could react to (crouching, underwater, afraid). | `OnFrame` with `f.Params` |
+| The game has states her animations could react to (crouching, underwater, afraid). | `OnFrame` with `f.Params`, and `DeclareParam` |
 | A game event deserves a gesture. | `Cues` |
 | She should show up in mirrors or in-game cameras. | `AlsoDrawInto` (URP games only, for now) |
 | The game's light is unusual (its own day cycle, darker than most). | `UseSun`, `UseLook` |
@@ -434,12 +434,35 @@ set's default. `Params` is cleared every frame, so set every fact every frame.
 - **List your parameters in your README**: name, type, meaning, units. That is what pack authors
   read.
 
-**Declaring your parameters (coming; engine side done, foundation pending).** The engine already
-accepts the list of parameters a game sends, in its `hello` message (`params`, each
-`{"name": …, "type": "float" | "bool"}`), and keeps it per integration id, so Astra's Studio can
-show a player what your game sends before it ever ran and offer to make her react to it. The
-foundation does not send that list yet, and the SDK has no call for it. Until it does, your README
-is the declaration.
+**Declare every parameter you send**, where you register:
+
+```csharp
+using Astra.Bridge;   // ParamType
+
+var astra = AstraSdk.Register("astra.mygame", "My Game")
+    .DeclareParam("climbing", ParamType.Bool)
+    .DeclareParam("water_depth", ParamType.Float);
+```
+
+The foundation puts the list in its `hello` to the engine (`params`, [`PROTOCOL.md`](PROTOCOL.md)),
+after the two it measures itself (`speed`, `airborne`, declared for you). Astra keeps it for your
+integration id, so a player sees what your game sends before ever starting it, and can make her react
+to it. `DeclareParam` throws an `ArgumentException` for a name that is not an identifier of at most
+32 characters, for `speed` or `airborne`, for a name declared again with the other type, and past the
+64th; declaring the same parameter twice does nothing. `ParamType` is `Bool` or `Float`, the two
+types an animation set knows. `DeclareParam` needs an SDK newer than 0.6.1; with 0.6.1, your README
+is the only declaration.
+
+**The engine tells you what went wrong.** A parameter her animation set does not declare, a `play`
+cue naming a state it does not have, a cue for another set: the engine says so in a `warn` message,
+and the foundation prints each one once, as a warning in `BepInEx/LogOutput.log`:
+
+```
+[Warning:     Astra] Astra warns: her animation set does not declare the parameter 'climbing' (kept: it takes effect once a set that declares it is active)
+```
+
+That warning is normal for a fact no pack uses yet. It tells you of a typo too: the parameter you
+meant to send is spelled differently.
 
 ## 7. Test it in the game
 

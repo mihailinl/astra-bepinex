@@ -54,7 +54,7 @@ for more Unity lines, robustness for IL2CPP builds, and new integrations.
 | `src/Astra.Unity.Sdk` | Packs both `Astra.Unity.dll` builds into the `Astra.Unity.Sdk` NuGet package that integrations compile against. |
 | `templates/` | The `dotnet new astra-integration` template. |
 | `tests/Astra.Bridge.Core.Tests` | xUnit tests for `Astra.Bridge.Core` (plus two end-to-end tests that need an engine). |
-| `tests/TestbedIntegration` | An integration made from the template, for the testbed. |
+| `tests/TestbedIntegration` | An integration made from the template, for the testbed. It compiles against this checkout's foundation, not the SDK package. |
 | `tools/` | `pack.sh` (build everything), `build-bundles.sh` (shader bundles), `check-game-members/` (metadata checks against a game), `make-runner-gi.sh` and `make-runner-il2cpp-gi.sh` (the release zips). |
 | `unity/AstraShaders` | The composite shader (`Assets/Astra/AstraComposite.shader`), its bundle builder (`Assets/Editor/BuildBundles.cs`) and the committed bundles (`Build/`). |
 | `unity/AstraTestbed`, `unity/com.astra.testbed` | The testbed: a tiny URP game built in code (Unity 6000.3.18f1). |
@@ -77,7 +77,7 @@ nuget.org and BepInEx's feed (`NuGet.Config`).
 
 ```bash
 dotnet build src/Astra.BepInEx5 -c Release        # the Mono foundation
-dotnet test tests/Astra.Bridge.Core.Tests         # 70 tests; the 2 EngineTests are skipped
+dotnet test tests/Astra.Bridge.Core.Tests         # 91 tests; the 2 EngineTests are skipped
 ```
 
 The two `EngineTests` run against a real engine when `ASTRA_ENGINE` names an

@@ -25,7 +25,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Astra.Unity.Sdk" Version="0.2.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <!-- The foundation as it is in THIS checkout, compile-only (Private="false": never shipped with
+         the plugin), so the testbed exercises the SDK being changed, never a package in the NuGet
+         cache. An integration in its own repository references the Astra.Unity.Sdk PACKAGE instead
+         (templates/astra-integration). -->
+    <ProjectReference Include="../../src/Astra.BepInEx5/Astra.BepInEx5.csproj" Private="false" />
+    <ProjectReference Include="../../src/Astra.Bridge.Core/Astra.Bridge.Core.csproj" Private="false" />
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
     <PackageReference Include="BepInEx.Core" Version="5.4.21" PrivateAssets="all" />
   </ItemGroup>

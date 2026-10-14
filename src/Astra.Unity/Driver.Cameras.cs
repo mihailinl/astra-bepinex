@@ -98,7 +98,7 @@ namespace Astra.Unity
                 SendCues(frame.Cues);
                 if (integration != null) SendCues(integration.Cues);
                 parameters.Clear();
-                parameters.Set("speed", new Vector3(velocity.x, 0, velocity.z).magnitude).Set("airborne", her.Airborne);
+                parameters.Set(ParamDecl.Speed.Name, new Vector3(velocity.x, 0, velocity.z).magnitude).Set(ParamDecl.Airborne.Name, her.Airborne);
                 parameters.MergeFrom(frame.Params);
                 Send(Messages.Avatar(new Placement
                 {

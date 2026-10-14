@@ -147,6 +147,102 @@ public class BridgeLinkTests
         Assert.Equal(1, Volatile.Read(ref connections));
     }
 
+    /// <summary>hello.params and hello.caps go out in the hello; the engine's warn messages come back
+    /// through the Warn sink, each distinct one once.</summary>
+    [Fact]
+    public async Task the_hello_declares_what_it_sends_and_each_warning_is_said_once()
+    {
+        int port = FreePort();
+        var http = new HttpListener();
+        http.Prefixes.Add($"http://127.0.0.1:{port}/");
+        http.Start();
+        string hello = null;
+        var served = Task.Run(async () =>
+        {
+            var ctx = await http.GetContextAsync();
+            var ws = (await ctx.AcceptWebSocketAsync(null)).WebSocket;
+            hello = await Receive(ws);
+            await Send(ws, "{\"t\":\"hello\",\"v\":1,\"engine\":\"e\",\"ver\":\"0\",\"shm\":\"x\",\"maxW\":8,\"maxH\":8,\"caps\":[\"hello.params\",\"warn\"]}");
+            for (int i = 0; i < 3; i++)
+                await Send(ws, "{\"t\":\"warn\",\"code\":\"param_undeclared\",\"name\":\"climbing\"}");
+            await Send(ws, "{\"t\":\"warn\",\"code\":\"state_unknown\",\"name\":\"seat\"}");
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
+        });
+
+        var warned = new List<string>();
+        var logged = new List<string>();
+        using var link = new BridgeLink("test", port, retryMs: 2000);
+        link.Log = s => { lock (logged) logged.Add(s); };
+        link.Warn = s => { lock (warned) warned.Add(s); };
+        link.Integration = "astra.test";
+        link.Params = new[] { ParamDecl.Speed, ParamDecl.Airborne, new ParamDecl("climbing", ParamType.Bool) };
+        link.MarkWanted();
+        link.Start();
+        await Task.WhenAny(served, Task.Delay(5000));
+        for (int i = 0; i < 50 && !warned.Exists(l => l.Contains("'seat'")); i++) await Task.Delay(50);
+        http.Stop();
+
+        Assert.Contains("\"caps\":[\"warn\"]", hello);
+        Assert.Contains("\"params\":[{\"name\":\"speed\",\"type\":\"float\"},{\"name\":\"airborne\",\"type\":\"bool\"},{\"name\":\"climbing\",\"type\":\"bool\"}]", hello);
+        lock (warned)
+        {
+            Assert.Equal(2, warned.Count);
+            Assert.Single(warned, l => l.Contains("'climbing'"));
+            Assert.Single(warned, l => l.Contains("'seat'"));
+        }
+        lock (logged) Assert.DoesNotContain(logged, l => l.Contains("warns"));
+    }
+
+    /// <summary>An engine whose hello listed caps WITHOUT hello.params is not sent them on the next
+    /// connection; one whose caps are not known yet is (an older engine ignores the field).</summary>
+    [Fact]
+    public async Task an_engine_that_does_not_take_declarations_is_not_sent_them_again()
+    {
+        int port = FreePort();
+        var http = new HttpListener();
+        http.Prefixes.Add($"http://127.0.0.1:{port}/");
+        http.Start();
+        var hellos = new List<string>();
+        var served = Task.Run(async () =>
+        {
+            for (int n = 0; n < 2; n++)
+            {
+                var ctx = await http.GetContextAsync();
+                var ws = (await ctx.AcceptWebSocketAsync(null)).WebSocket;
+                var text = await Receive(ws);
+                lock (hellos) hellos.Add(text);
+                await Send(ws, "{\"t\":\"hello\",\"v\":1,\"engine\":\"e\",\"ver\":\"0\",\"shm\":\"x\",\"maxW\":8,\"maxH\":8,\"caps\":[\"warn\"]}");
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
+            }
+        });
+
+        using var link = new BridgeLink("test", port, retryMs: 250);
+        link.Params = new[] { ParamDecl.Speed };
+        link.MarkWanted();
+        link.Start();
+        for (int i = 0; i < 60 && !served.IsCompleted; i++)
+        {
+            link.MarkWanted();
+            await Task.Delay(50);
+        }
+        http.Stop();
+
+        lock (hellos)
+        {
+            Assert.Equal(2, hellos.Count);
+            Assert.Contains("\"params\":", hellos[0]);
+            Assert.DoesNotContain("\"params\":", hellos[1]);
+            Assert.Contains("\"caps\":[\"warn\"]", hellos[1]);
+        }
+    }
+
+    static async Task<string> Receive(WebSocket ws)
+    {
+        var buf = new byte[8192];
+        var r = await ws.ReceiveAsync(new ArraySegment<byte>(buf), CancellationToken.None);
+        return Encoding.UTF8.GetString(buf, 0, r.Count);
+    }
+
     static Task Send(WebSocket ws, string text) =>
         ws.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, CancellationToken.None);
 }

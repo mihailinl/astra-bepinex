@@ -43,6 +43,11 @@ namespace Astra.Bridge
         int session;
         string lastState;
         readonly HashSet<string> loggedErrors = new HashSet<string>(); // per CONNECTION: cleared on every new one
+        readonly WarnLog warnings = new WarnLog(); // for the link's whole life: a reconnect does not repeat them
+
+        /// <summary>What this side understands beyond the first contract, said in every hello
+        /// (<c>hello.caps</c>): the engine's <c>warn</c> messages, logged through <see cref="Warn"/>.</summary>
+        static readonly string[] OurCaps = { "warn" };
 
         /// <summary>How long ago (<see cref="Environment.TickCount"/> ms) the owning game last proved,
         /// through <see cref="MarkWanted"/>, that it is alive and still wants this link. Read on the
@@ -57,6 +62,10 @@ namespace Astra.Bridge
 
         /// <summary>Diagnostics, called on the link's own thread — the sink must be thread-safe.</summary>
         public Action<string> Log;
+
+        /// <summary>The engine's warnings about what this game sent (<see cref="WarnLog"/>: each once),
+        /// called on the link's own thread; null = through <see cref="Log"/>.</summary>
+        public Action<string> Warn;
 
         /// <param name="client">Your mod's name, shown in Astra's log.</param>
         /// <param name="port">The engine's bridge port.</param>
@@ -110,6 +119,12 @@ namespace Astra.Bridge
         /// <summary>The game's integration id, when one is registered (<c>hello.integration</c>);
         /// null = none.</summary>
         public string Integration { get; set; }
+
+        /// <summary>The raw parameters this game sends (<c>hello.params</c>), which the engine keeps per
+        /// <see cref="Integration"/> so Astra can show them to the player; null = not said. Read fresh
+        /// on every (re)connect, and sent unless the engine's last hello said it does not take them.
+        /// Hand it a copy (<see cref="ParamDeclarations.ToArray"/>): this thread reads it.</summary>
+        public ParamDecl[] Params { get; set; }
 
         /// <summary>Bumped on every engine hello: a new session — map the ring again.</summary>
         public int Session => Volatile.Read(ref session);
@@ -174,7 +189,10 @@ namespace Astra.Bridge
                     ws = socket;
                     loggedErrors.Clear(); // a new connection: an engine error is worth saying again
                     LastError = null;
-                    if (!socket.SendText(Messages.Hello(client, token, EffectiveShadow(), Game, Foundation, Integration, Crop)))
+                    // hello.params goes to an engine that takes it, or whose caps are not known yet (an
+                    // older engine ignores it): like the shadow word, never to one that said otherwise.
+                    var declared = Supports("hello.params") ? Params : null;
+                    if (!socket.SendText(Messages.Hello(client, token, EffectiveShadow(), Game, Foundation, Integration, Crop, declared, OurCaps)))
                         throw new IOException("closed before hello");
                     State($"connected to Astra on {host}:{port}");
                     while (true)
@@ -234,7 +252,14 @@ namespace Astra.Bridge
                 Log?.Invoke($"Astra {reply.EngineVersion}: frames in '{reply.Shm}', up to {reply.MaxWidth}x{reply.MaxHeight}");
                 return;
             }
-            if (m.TryGetValue("t", out var t) && (t as string) == "error")
+            m.TryGetValue("t", out var t);
+            if ((t as string) == "warn")
+            {
+                string line = warnings.Admit(Text(m, "code"), Text(m, "name"), Text(m, "why"));
+                if (line != null) (Warn ?? Log)?.Invoke(line);
+                return;
+            }
+            if ((t as string) == "error")
             {
                 LastError = m.TryGetValue("msg", out var msg) ? msg as string : "error";
                 // Once per distinct engine error text per connection: a game that keeps sending
@@ -252,6 +277,8 @@ namespace Astra.Bridge
         }
 
         static string Clip(string s) => s.Length <= 200 ? s : s.Substring(0, 200) + "…";
+
+        static string Text(Dictionary<string, object> m, string key) => m.TryGetValue(key, out var v) ? v as string : null;
 
         public void Dispose()
         {

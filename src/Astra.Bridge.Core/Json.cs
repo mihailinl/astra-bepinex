@@ -94,6 +94,20 @@ namespace Astra.Bridge
             return this;
         }
 
+        /// <summary>An array of strings under <paramref name="key"/>.</summary>
+        public JsonWriter Strs(string key, IList<string> values)
+        {
+            Key(key);
+            sb.Append('[');
+            for (int i = 0; i < values.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                Quote(values[i]);
+            }
+            sb.Append(']');
+            return this;
+        }
+
         /// <summary>An array of objects under <paramref name="key"/>: <see cref="Item"/> opens each one
         /// (<see cref="Close"/> it), <see cref="CloseArray"/> ends the array.</summary>
         public JsonWriter OpenArray(string key)

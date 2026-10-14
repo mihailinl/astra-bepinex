@@ -229,7 +229,25 @@ namespace Astra.Bridge
         /// <param name="crop">Ask for her RECTANGLE of each picture only (flag 128): a few hundred KB a
         /// frame instead of the whole picture. An engine without the <c>crop</c> cap ignores it, so a
         /// reader checks <see cref="FrameRing.FlagCrop"/> on every frame.</param>
-        public static string Hello(string client, string token, string shadow, string game, string foundation, string integration, bool crop)
+        public static string Hello(string client, string token, string shadow, string game, string foundation, string integration, bool crop) =>
+            Hello(client, token, shadow, game, foundation, integration, crop, null, null);
+
+        /// <param name="client">Who is asking (a log line on the engine's side).</param>
+        /// <param name="token">The engine's bridge token, if it has one.</param>
+        /// <param name="shadow">Which of her shadows the game reads (see the overloads above).</param>
+        /// <param name="game">The game's display name; null = not said.</param>
+        /// <param name="foundation">This foundation's version; null = not said.</param>
+        /// <param name="integration">The game's integration id, when one is registered; null = none.</param>
+        /// <param name="crop">Ask for her rectangle of each picture only (see the overload above).</param>
+        /// <param name="parameters">The raw parameters this game sends (<c>params</c>), kept by the
+        /// engine per <paramref name="integration"/> so Astra can show them to the player; null = not
+        /// said, empty = "none". An entry whose name is not a parameter name
+        /// (<see cref="ParamDecl.ValidName"/>), a name already listed and any past the
+        /// <see cref="ParamDeclarations.MaxCount"/>th are left out.</param>
+        /// <param name="caps">What THIS side understands beyond the first contract (<c>caps</c>), e.g.
+        /// <c>"warn"</c>: the engine then sends those optional messages; null or empty = not said.</param>
+        public static string Hello(string client, string token, string shadow, string game, string foundation, string integration, bool crop,
+            IList<ParamDecl> parameters, IList<string> caps)
         {
             var w = Begin("hello").Num("v", ProtocolVersion).Str("client", client ?? "unknown");
             if (!string.IsNullOrEmpty(token)) w.Str("token", token);
@@ -238,6 +256,19 @@ namespace Astra.Bridge
             if (!string.IsNullOrEmpty(game)) w.Str("game", game);
             if (!string.IsNullOrEmpty(foundation)) w.Str("foundation", foundation);
             if (!string.IsNullOrEmpty(integration)) w.Str("integration", integration);
+            if (caps != null && caps.Count > 0) w.Strs("caps", caps);
+            if (parameters != null)
+            {
+                w.OpenArray("params");
+                var named = new HashSet<string>();
+                foreach (var p in parameters)
+                {
+                    if (named.Count >= ParamDeclarations.MaxCount) break;
+                    if (!ParamDecl.ValidName(p.Name) || !named.Add(p.Name)) continue;
+                    w.Item().Str("name", p.Name).Str("type", p.TypeWord).Close();
+                }
+                w.CloseArray();
+            }
             return End(w);
         }
 
