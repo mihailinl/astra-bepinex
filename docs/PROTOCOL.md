@@ -17,6 +17,15 @@ mod can use it), and the Unity foundation is built on that. The foundation sends
 `trigger` / `resume` and `light`, reads the frame ring, and prints the engine's `warn` messages. It
 does not capture yet: `clip_ready` and the hello reply's `inbox` are for a later foundation.
 
+**What a released engine has (2026-10-14).** BRIDGE.md describes the engine as it is built today,
+ahead of its newest release, v0.2.0 (2026-10-07). v0.2.0 has the `caps` words `views`, `caster`,
+`light`, `light.fog`, `params`, `cues`, `game-level` and `lenient`. Everything else below comes with
+the engine release after v0.2.0: the `caps` words `crop`, `hello.params`, `warn` and `capture`; the
+hello's `crop`, `caps` and `params`; the `warn` message; `clip_ready` and the reply's `inbox`; and a
+parameter her set does not declare being REMEMBERED (v0.2.0 ignores it). So the example reply's
+`"ver":"0.2.0"` beside those words shows a newer engine: decide by the reply's `caps`, never by
+`ver`. (This block is this repository's own: update it at each engine release.)
+
 <!-- Everything below is generated from the engine's BRIDGE.md by tools/check-protocol-sync.sh --write: edit BRIDGE.md, not this. -->
 
 ## Running it
