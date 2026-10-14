@@ -16,8 +16,10 @@ games (BepInEx 6), built from one code base.
   render pipelines.
 - **Windows**, and **Linux through Proton** (see below).
 - **BepInEx 5, Mono** — the tested, supported path.
-- **BepInEx 6, IL2CPP, is experimental**: it builds and runs on the testbed, but has not yet been
-  run against a real IL2CPP game — use it and tell us what you find.
+- **BepInEx 6, IL2CPP, is experimental**: the IL2CPP runner (v0.6.1) has run in two real IL2CPP
+  games, MiSide (Unity 2021.3, Built-in) and Schedule I (Unity 2022.3, URP), and on the testbed.
+  Every IL2CPP game strips its own share of Unity, so a new one can still fail: tell us what you
+  find ([what to report](CONTRIBUTING.md#reporting-a-game-that-does-not-work)).
 - She works in **any** Unity game with no integration at all: the default follower keeps her near
   the nearest object tagged `Player` (else the camera) through the game's own colliders, lit by
   its sun. A **game integration** only REFINES who the player really is, the camera, her size and
@@ -45,21 +47,31 @@ protocol — `src/Astra.Bridge.Core` is a plain .NET Standard 2.0 library any .N
 You need the **Astra app** running (she switches from your desktop into the game by herself when
 the game connects, and back when it closes).
 
+**With Astra, the usual way:** in Astra's **Games** tab, add the game with "Astra for any Unity
+game" (or paste a game integration's GitHub address) and press Play. Astra installs BepInEx and the
+foundation into a profile of its own, puts only Doorstop's two files beside the game's exe (put back
+when you uninstall), and starts the game with them; Steam's own Play stays vanilla.
+
+**By hand**, into the game's own folder:
+
 ### Mono games (most Unity games: `<Game>_Data/Managed/Assembly-CSharp.dll` exists)
 
 1. Install **BepInEx 5** (x64): with a mod manager (r2modman, Gale, Thunderstore — install
    "BepInExPack"), or by hand from the [releases](https://github.com/BepInEx/BepInEx/releases)
    (`BepInEx_win_x64_5.4.23.x.zip` unzipped into the game's folder).
-2. Copy the foundation (`artifacts/foundation-mono/BepInEx/…` from `tools/pack.sh`) into the game:
-   `BepInEx/plugins/Astra/` holds `Astra.Unity.dll`, `Astra.Bridge.Core.dll`, `Astra.Urp17.dll` and
-   `astra-item.json`.
+2. Copy the foundation into the game: `BepInEx/plugins/Astra/` from the `astra-gi.zip` of a
+   [release](https://github.com/mihailinl/astra-bepinex/releases) (or `artifacts/foundation-mono/`
+   after `tools/pack.sh`). It holds `Astra.Unity.dll`, `Astra.Bridge.Core.dll`, the pipeline
+   adapters (`Astra.Urp17.dll`, `Astra.Urp14.dll`, `Astra.Hdrp.dll`) and `astra-item.json`.
 
 ### IL2CPP games (`GameAssembly.dll` and `<Game>_Data/il2cpp_data` exist)
 
 1. Install **BepInEx 6** for IL2CPP (`BepInEx-Unity.IL2CPP-win-x64-6.0.0-…`). Start the game once
    and let BepInEx generate its `interop` folder.
-2. Copy the IL2CPP foundation (`artifacts/foundation-il2cpp/BepInEx/…`) into the game:
-   `BepInEx/plugins/Astra/` holds `Astra.Unity.dll`, `Astra.Bridge.Core.dll` and `astra-item.json`.
+2. Copy the IL2CPP foundation into the game: `BepInEx/plugins/Astra/` from the
+   `astra-gi-il2cpp.zip` of a [release](https://github.com/mihailinl/astra-bepinex/releases) (or
+   `artifacts/foundation-il2cpp/` after `tools/pack.sh`). It holds `Astra.Unity.dll`,
+   `Astra.Bridge.Core.dll` and `astra-item.json`.
 
 ### Linux: a Windows game under Proton
 

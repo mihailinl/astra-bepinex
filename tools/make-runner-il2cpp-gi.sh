@@ -32,7 +32,13 @@ cp -r artifacts/foundation-il2cpp/BepInEx/plugins/Astra "$Z/BepInEx/plugins/Astr
 cp "$OUT/bie/winhttp.dll" "$Z/winhttp.dll"
 cp runner/il2cpp/doorstop_config.ini "$Z/doorstop_config.ini"
 cp LICENSE "$Z/licenses/astra-foundation-LICENSE.txt"
-cp runner/licenses/BepInEx-LICENSE.txt "$Z/licenses/BepInEx-LICENSE.txt"
+# BepInEx's LGPL text (runner/licenses/BepInEx-LICENSE.txt, whose header names the Mono runner's
+# BepInEx 5), under a header that names what THIS zip bundles.
+{ printf '%s\n' "# BepInEx is licensed under the GNU Lesser General Public License v2.1." \
+    "# Source: https://github.com/BepInEx/BepInEx" \
+    "# This zip bundles its bleeding-edge build 788 (6.0.0-be.788, IL2CPP) unmodified (except" \
+    "# doorstop_config.ini's 'enabled' flag, which this zip ships set to false)." ""
+  sed '1,/^$/d' runner/licenses/BepInEx-LICENSE.txt; } > "$Z/licenses/BepInEx-LICENSE.txt"
 printf 'BepInEx 6 (IL2CPP) bleeding-edge build 788 (LGPL-2.1): https://github.com/BepInEx/BepInEx\nIts dotnet/ folder is the .NET runtime (MIT): https://github.com/dotnet/runtime\n' > "$Z/licenses/SOURCES.txt"
 cp runner/il2cpp/astra-gi.toml "$Z/astra-gi.toml"
 mkdir -p artifacts && rm -f artifacts/astra-gi-il2cpp.zip
