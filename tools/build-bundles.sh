@@ -4,16 +4,22 @@
 # may run gets its own: astra-<major>-<platform>.bundle, beside the others in unity/AstraShaders/Build.
 # Usage: tools/build-bundles.sh /path/to/Unity  (e.g. ~/Unity/Hub/Editor/2022.3.62f2/Editor/Unity)
 #   UNITY_EXTRA_LIBS=<dir>  prepended to LD_LIBRARY_PATH — an older editor on a newer distro may need
-#                           a library the distro no longer ships (2021.3 wants libxml2.so.2).
+#                           a library the distro no longer ships (2021.3 wants libxml2.so.2; 2019.4 and
+#                           2020.3 want libgconf-2.so.4 as well).
+#   ASTRA_PYTHON=<python>   a python with UnityPy, for tools/check-bundles.py (default python3)
+#   ASTRA_SCRATCH=<dir>     where the throw-away project is made (default $TMPDIR or /tmp — a tmpfs on
+#                           some systems; the project's Library takes a few hundred MB).
 # An older editor's licensing client loads a library with an executable stack, which glibc 2.41+
 # refuses unless allowed: the editor runs with glibc.rtld.execstack=2 (set GLIBC_TUNABLES to override).
+# A 2020 editor's C# compiler (an old .NET Core) finds no ICU it knows on a newer distro and aborts
+# ("Scripts have compiler errors"): it runs with DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 EDITOR=${1:?path to a Unity editor binary}
 VERSION=$("$EDITOR" -version 2>/dev/null | tail -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[a-z][0-9]+' || true)
 [ -n "$VERSION" ] || VERSION=$(basename "$(dirname "$(dirname "$EDITOR")")")
 SRC=unity/AstraShaders
-PROJ=$(mktemp -d "${TMPDIR:-/tmp}/astra-shaders-$VERSION.XXXX")
+PROJ=$(mktemp -d "${ASTRA_SCRATCH:-${TMPDIR:-/tmp}}/astra-shaders-$VERSION.XXXX")
 mkdir -p "$PROJ/Assets" "$PROJ/Packages" "$PROJ/ProjectSettings"
 cp -r "$SRC/Assets/Astra" "$SRC/Assets/Editor" "$PROJ/Assets/"
 # Only Unity's built-in modules: an editor adds its own toolchain packages to the manifest, and another
@@ -26,8 +32,11 @@ echo "building the bundles with Unity $VERSION in $PROJ"
 # --stdin-canary keeps it from closing. Wrap that editor's Data/bee_backend once (Unity forum, "Linux
 # editor stuck on loading because of bee_backend w/ workaround"): rename it bee_backend_real and put
 # in its place a script that drops --stdin-canary and execs "${0}_real" with the other arguments.
-LD_LIBRARY_PATH=${UNITY_EXTRA_LIBS:-}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} GLIBC_TUNABLES=${GLIBC_TUNABLES:-glibc.rtld.execstack=2} "$EDITOR" -batchmode -quit -nographics -projectPath "$PROJ" -executeMethod BuildBundles.Build -logFile "$PROJ/build.log" || {
+LD_LIBRARY_PATH=${UNITY_EXTRA_LIBS:-}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} GLIBC_TUNABLES=${GLIBC_TUNABLES:-glibc.rtld.execstack=2} \
+  DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=${DOTNET_SYSTEM_GLOBALIZATION_INVARIANT:-1} "$EDITOR" -batchmode -quit -nographics -projectPath "$PROJ" -executeMethod BuildBundles.Build -logFile "$PROJ/build.log" || {
   grep -E 'error|Exception' "$PROJ/build.log" | head -20; exit 1; }
+# Every pass, for every API, in what was BUILT (a pass that fails to compile is left out silently).
+"${ASTRA_PYTHON:-python3}" tools/check-bundles.py "$SRC/Assets/Astra/AstraComposite.shader" "$PROJ"/Build/astra-*.bundle
 cp "$PROJ"/Build/astra-*.bundle "$SRC/Build/"
 ls -la "$SRC"/Build/astra-*.bundle
 rm -rf "$PROJ"

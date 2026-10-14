@@ -224,12 +224,14 @@ The committed bundles and the editors that built them (each bundle's header name
 
 | bundle | editor |
 |---|---|
+| `astra-2020-{windows,linux}.bundle` | 2020.3.49f1 |
 | `astra-2021-{windows,linux}.bundle` | 2021.3.35f1 |
 | `astra-2022-{windows,linux}.bundle` | 2022.3.62f2 |
 | `astra-6000-{windows,linux}.bundle` | 6000.3.18f1 |
 
-**Wanted:** bundles for **2019** and **2020**, and a `6000` bundle from an older 6000.x editor (so
-6000.0–6000.2 games get the newest line's bundle).
+**Wanted:** a bundle for **2019** (the 2019.4 editor builds it, but refuses batch mode without a
+legacy licence file — a contributor with one can build it), and a `6000` bundle from an older 6000.x
+editor (so 6000.0–6000.2 games get the newest line's bundle).
 
 ### Build one
 
@@ -248,8 +250,13 @@ modules in its package manifest (another line cannot compile this project's pack
 `BuildBundles.Build` in batch mode. The new bundles land in `unity/AstraShaders/Build/`. If the
 build fails, it prints the error lines; the temporary project and its `build.log` stay in `$TMPDIR` (or `/tmp`).
 Old editors on new Linux distributions need help, and the script's header says how:
-`UNITY_EXTRA_LIBS` for a missing library (2021.3 wants `libxml2.so.2`), `GLIBC_TUNABLES` for the
-licensing client, and a `bee_backend` wrapper for 2021/2022 editors that hang after compiling.
+`UNITY_EXTRA_LIBS` for a missing library (2021.3 wants `libxml2.so.2`; 2019.4 and 2020.3 also want
+`libgconf-2.so.4`), `GLIBC_TUNABLES` for the licensing client, `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1`
+for the 2020 C# compiler, and a `bee_backend` wrapper for 2021/2022 editors that hang after
+compiling. After building, `tools/check-bundles.py` (needs UnityPy; `ASTRA_PYTHON` points at a
+Python that has it) reads every bundle and requires every pass of the shader with a program for every
+graphics API; the script refuses to keep a bundle that fails — a pass that did not compile is
+silently left out by Unity and makes the shader unsupported in every game.
 
 By hand, on any OS: create an empty project in that editor, copy `unity/AstraShaders/Assets/Astra`
 and `unity/AstraShaders/Assets/Editor` into its `Assets/`, choose **Astra → Build shader bundles** in
@@ -265,12 +272,15 @@ the menu, and copy `Build/astra-*.bundle` into `unity/AstraShaders/Build/`.
    bundle loaded; the line lists why each one was refused. Otherwise look for the `her:` line: it
    should say she is drawn.
 
-### 2019 and 2020
+### Older lines (2019, 2020)
 
-A bundle is the first step there, not the whole job. The foundation compiles against Unity 2021.3's
-API and is only tested on 2021.3 and newer. On older lines some calls it makes may not exist, and SRP
-games before 2021.1 have no "end of context rendering" event to draw her at (an open follow-up in
-`RENDER-CASES.md`). Build the bundle, try a game, and report what the log says.
+The 2020 bundle is built and proven on the testbed in the Built-in pipeline (Mono); no real 2020 game
+has been tried, and URP/HDRP on 2020 are untested. On older lines some calls the foundation makes may
+not exist, and SRP games before 2021.1 have no "end of context rendering" event to draw her at (an
+open follow-up in `RENDER-CASES.md`). Without a game of that line, prove a bundle on the testbed:
+`tools/build-testbed.sh <editor> <project dir> builtin` (or `urp:<version>`) builds a player with
+that editor, and `-astraScene glass` is the transparents test. Then try a game and report what the
+log says.
 
 ### What to put in the pull request
 
@@ -365,8 +375,8 @@ files.
 The open follow-ups at the end of [`docs/RENDER-CASES.md`](docs/RENDER-CASES.md) are the list of
 known work. Ones that fit a first contribution:
 
-- **A shader bundle for Unity 2019 or 2020** ([above](#a-shader-bundle-for-another-unity-line)).
-  Needs that editor.
+- **A shader bundle for Unity 2019** ([above](#a-shader-bundle-for-another-unity-line)), or a
+  report from a real Unity 2020 game. Needs that editor (and, for 2019, a legacy licence file).
 - **`timeScale` 0** (DISCOVERY item 5): when the game is paused, send `speed` 0, and send a raw
   `time_scale` parameter so her animation set can decide what a pause means.
 - **Temporal AA** (TEMPORAL AA item): use the camera's `nonJitteredProjectionMatrix` after temporal

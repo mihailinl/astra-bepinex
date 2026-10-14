@@ -7,18 +7,24 @@ using UnityEngine.Rendering.Universal;
 namespace Astra.Unity
 {
     /// <summary>
-    /// URP 13–16 (Unity 2022.1–2023): she is drawn INSIDE the camera's render, right after its
-    /// transparent objects and BEFORE its post-processing — so the game's own look is laid over her
+    /// URP 13–16 (Unity 2022.1–2023): she is drawn INSIDE the camera's render, right before its
+    /// transparent objects (or after them: [Picture] BeforeTransparents) and its post-processing —
+    /// so the game's own look is laid over her
     /// as over everything else in its world: its colour grading, and the renderer features a stylised
     /// game builds its picture with (Extermination Ship's pixelation, dithering and posterisation —
     /// composited over the finished frame she stood out sharp and clean among them, the owner's
     /// first look, 2026-10-08).
     /// <para>
     /// The GPU tests her depth against the camera's depth BUFFER (the composite shader's pass 1
-    /// outputs it as SV_Depth, as in HDRP), not against the depth TEXTURE. That pass does not WRITE
-    /// her depth (its ZWrite is off), so neither the depth buffer nor any depth texture URP copies
-    /// from it holds her: a depth-based effect (an outline, a fog, a depth of field) does not see
-    /// her, and URP's TAA has no motion vectors for her.
+    /// outputs it as SV_Depth, as in HDRP), not against the depth TEXTURE; then pass 2 WRITES her
+    /// depth into that buffer where she is solid, before the transparent objects are drawn. URP
+    /// 14's depth TEXTURE holds her only when it is copied after the transparents (the renderer's
+    /// "After Transparents" copy mode, or when only post-processing asks for depth: depth of field
+    /// and motion blur then see her); the usual copy (after the opaques, when the camera asks for a
+    /// depth texture) and a prepass's (SSAO, depth priming) are made before her, so an effect that
+    /// reads those does not see her. The opaque texture (refraction) is copied before her too: a
+    /// refractive surface in front of her that writes that copy as its colour hides her. URP's TAA
+    /// has no motion vectors for her.
     /// </para>
     /// <para>
     /// Its own assembly, compiled against URP 14, so the plugin itself keeps compiling against Unity
@@ -46,6 +52,8 @@ namespace Astra.Unity
             var renderer = data != null ? data.scriptableRenderer : null;
             if (renderer == null) return false;
             if (pass == null || pass.Compositor != compositor) pass = new AstraPass(compositor);
+            pass.Before = compositor.SrpBeforeTransparents();
+            pass.renderPassEvent = pass.Before ? RenderPassEvent.BeforeRenderingTransparents : RenderPassEvent.AfterRenderingTransparents;
             renderer.EnqueuePass(pass);
             return true;
         }
@@ -55,22 +63,23 @@ namespace Astra.Unity
             public readonly Compositor Compositor;
             readonly MaterialPropertyBlock block = new MaterialPropertyBlock();
             bool intoTexture;
+            /// <summary>Drawn before the transparent objects, writing her depth (see the constructor).</summary>
+            public bool Before = true;
 
             public AstraPass(Compositor compositor)
             {
                 Compositor = compositor;
-                // After the world's transparent objects, still before its post-processing. Her pass
-                // TESTS her depth against the depth buffer but does not write it, so at
-                // AfterRenderingSkybox every transparent object BEHIND her (water, glass, haze, sky
-                // domes, decals) was blended over her. After the transparents nothing behind her can
-                // paint over her. Transparents IN FRONT of her (particles, glass) are drawn under her
-                // instead: the limitation every other path has, until a composite shader that writes
-                // her depth lets her go back to AfterRenderingSkybox.
-                // Enqueued at the camera's start, before the renderer's own passes and its features', so
-                // at this same event she is drawn first. URP's colour copy for refraction (the opaque
-                // texture, at AfterRenderingSkybox) is made before her, so refractive water or glass in
-                // front of her shows the world without her behind it, and she is drawn over it.
-                renderPassEvent = RenderPassEvent.AfterRenderingTransparents;
+                // Set per frame by Enqueue: BeforeRenderingTransparents — after the opaque world, its
+                // sky, its screen-space decals and the opaque-texture copy (all at AfterRenderingSkybox:
+                // drawn after her there, a screen-space decal reconstructs the WALL from the depth
+                // texture and paints it over her), and before the transparent objects and the
+                // post-processing. Her colour is tested against the depth buffer (pass 1), then her
+                // depth is written into it (pass 2): a transparent object IN FRONT of her (particles,
+                // glass, water) is blended over her, one BEHIND her (haze, sky domes) fails the depth
+                // test where she stands. Enqueued at the camera's start, before the renderer's own
+                // passes (its transparent pass is at this same event) and its features', so she is
+                // drawn first. AfterRenderingTransparents with pass 1 alone is Astra 0.6.1's point.
+                renderPassEvent = RenderPassEvent.BeforeRenderingTransparents;
             }
 
             /// <summary>No target configured: URP draws the pass into the camera's own colour and depth
@@ -98,6 +107,7 @@ namespace Astra.Unity
                     if (!Compositor.PrepareForPass(cam, intoTexture, block)) return;
                     var cmd = CommandBufferPool.Get("Astra");
                     cmd.DrawProcedural(Matrix4x4.identity, Compositor.Material, Compositor.DepthBufferPass, MeshTopology.Triangles, 3, 1, block);
+                    if (Before) cmd.DrawProcedural(Matrix4x4.identity, Compositor.Material, Compositor.HerDepthPass, MeshTopology.Triangles, 3, 1, block);
                     context.ExecuteCommandBuffer(cmd);
                     CommandBufferPool.Release(cmd);
                 }

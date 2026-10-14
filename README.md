@@ -14,6 +14,10 @@ games (BepInEx 6), built from one code base.
 
 - **Unity 2021.3 and newer** (2021.3 LTS, 2022, 6000) — the **Built-in**, **URP** and **HDRP**
   render pipelines.
+- **Unity 2020.3** (Mono) — the **Built-in** pipeline, run on the testbed. URP and HDRP games on
+  2020 are untested (that line has no end-of-frame event: she is drawn right after the main
+  camera). **Unity 2019.4** is not supported yet: its shader bundle still has to
+  be built (see Build).
 - **Windows**, and **Linux through Proton** (see below).
 - **BepInEx 5, Mono** — the tested, supported path.
 - **BepInEx 6, IL2CPP, is experimental**: the IL2CPP runner (v0.6.1) has run in two real IL2CPP
@@ -101,6 +105,7 @@ change the DEFAULTS; a value you change here always wins:
 | Picture | `ColourSpace` | `auto` | `linear`/`gamma` if she looks too dark or washed out |
 | Picture | `MaxHeight` | 1080 | her picture's resolution (the engine's maximum; with an engine that crops — 0.2.1+ — only her rectangle of it is copied) |
 | Picture | `BeforePostProcessing` | true | URP games on Unity 2022–2023: draw her before the game's post-processing, so its look (grading, pixelation, dithering) is on her too |
+| Picture | `BeforeTransparents` | `auto` | with BeforePostProcessing: `before` = drawn before the game's transparent objects (particles, glass, water in front of her cover her), `after` = over all of them (0.6.1); `auto` = before, unless a Built-in game runs its own effects there |
 | Picture | `SendLight` | `true` | light her with the game's sun |
 | Connection | `Port` / `Token` / `RingPath` | 25600 / — / auto | only if you changed Astra's |
 
@@ -144,12 +149,18 @@ tools/pack.sh [<an IL2CPP game>/BepInEx/interop]   # everything → artifacts/
 `tools/pack.sh` compiles the pipeline adapters and the IL2CPP flavour against assemblies that have
 no NuGet package; [`CONTRIBUTING.md`](CONTRIBUTING.md#everything-toolspacksh) says which folders to
 point it at. On a fresh clone it builds what it can and ends by naming what it left out and the
-variable that brings each part back. The composite shader is a Unity asset bundle per Unity line, embedded in the plugins:
-2021, 2022 and 6000 today. A bundle loads in its own line and newer ones, never older, so bundles
-for 2019–2020 are welcome ([how](CONTRIBUTING.md#a-shader-bundle-for-another-unity-line)). An IL2CPP
-game's build strips the engine API the game never uses; check the IL2CPP flavour against a game with
+variable that brings each part back. The composite shader is a Unity asset bundle per Unity line,
+embedded in the plugins: 2020 (2020.3.49), 2021 (2021.3.35), 2022 (2022.3.62) and 6000 (6000.3.18)
+today. A bundle loads in its own line and newer ones, never older, and the plugin picks the newest
+one not newer than the game's line, so a new line needs only its bundle file. The 2019 line's is
+welcome ([how](CONTRIBUTING.md#a-shader-bundle-for-another-unity-line); the 2019.4 editor refuses
+batch mode without a legacy licence file). The build fails if any pass of the shader is missing for
+one of a bundle's graphics APIs (`tools/check-bundles.py`). An IL2CPP game's build strips the engine
+API the game never uses; check the IL2CPP flavour against a game with
 [the stripping audit](CONTRIBUTING.md#il2cpp-games-the-stripping-audit). `unity/AstraTestbed` is a
-tiny URP game built in code to test both plugins without a real game.
+tiny game built in code to test both plugins without a real game — URP or Built-in, any line
+(`tools/build-testbed.sh`), and `-astraScene glass` is the transparents test (glass and sparks in
+front of her, a spark cloud behind her).
 
 ## Contributing
 

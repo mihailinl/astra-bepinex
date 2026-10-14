@@ -3,10 +3,12 @@ using System;
 using System.Collections;
 using System.IO;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 /// <summary>
 /// A tiny "game" to test the plugins on, built entirely in code (no assets to keep in sync), shared by
-/// the URP and the HDRP testbed projects (a local package): ground,
+/// the URP, HDRP and Built-in testbed projects (a local package; C# 7.3, so Unity 2019.4 compiles
+/// it too): ground,
 /// walls, a ramp, stairs, a sun, and a player — a capsule tagged <c>Player</c> with a
 /// <see cref="CharacterController"/> — that walks a loop, runs, jumps, while a third-person camera
 /// follows and now and then whips round (the turn that shows ghosting).
@@ -17,6 +19,14 @@ using UnityEngine;
 /// a near-black ambient (what a cave's baked probes give), and — one after the other, 4 s each —
 /// no light, a warm ceiling lamp, a flashlight from the camera, three coloured lamps around the room.
 /// The shots at 2, 6, 10 and 14 s show her in each.
+/// <c>-astraScene glass</c> is the TRANSPARENTS test: the player stands still, a fixed camera looks
+/// at her through a pane of tinted glass over the right half of the picture and a drift of sparks in
+/// front of her, with a bright haze behind her head and a dense cloud of other sparks just behind her
+/// (between her and the player). The glass and the near sparks must lie over her; the haze and the
+/// cloud must be hidden where she stands — her soft edge (hair tips) shows how they meet her.
+/// <c>-astraForeignBuffer</c> (with the glass scene): the camera also runs a command buffer of the
+/// "game's" own before its transparent objects (Built-in BeforeForwardAlpha), painting a red stain
+/// over her legs, the way ULTRAKILL composites its blood there.
 /// </para>
 /// </summary>
 public sealed class Testbed : MonoBehaviour
@@ -34,7 +44,7 @@ public sealed class Testbed : MonoBehaviour
     float quitAt = -1, nextShot = 2, shotEvery = 4;
     int shotN;
     RenderTexture offscreen;
-    bool dark;
+    bool dark, glass, foreign;
     Light lamp, torch;
     Light[] party;
 
@@ -48,12 +58,14 @@ public sealed class Testbed : MonoBehaviour
         {
             if (args[i] == "-astraShots") shots = args[i + 1];
             if (args[i] == "-astraQuit") quitAt = float.Parse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture);
-            if (args[i] == "-astraScene") dark = args[i + 1] == "dark";
+            if (args[i] == "-astraScene") { dark = args[i + 1] == "dark"; glass = args[i + 1] == "glass"; }
         }
         if (shots != null) Directory.CreateDirectory(shots);
         Application.targetFrameRate = 60;
         BuildWorld();
+        foreign = Array.IndexOf(args, "-astraForeignBuffer") >= 0;
         if (dark) BuildDarkRoom();
+        if (glass) BuildGlass();
         if (Array.IndexOf(args, "-astraOffscreen") >= 0 || Application.isBatchMode)
         {
             offscreen = new RenderTexture(1280, 720, 24) { name = "Testbed offscreen" };
@@ -144,6 +156,115 @@ public sealed class Testbed : MonoBehaviour
         Paint(g, c, null, Vector2.one, smooth, metal);
     }
 
+    // She waits about 1.5 m in front of the player, toward the camera: about 3 m from it.
+    static readonly Vector3 GlassEye = new Vector3(0.3f, 1.4f, -4.4f);
+    static readonly Vector3 GlassLook = new Vector3(0f, 0.9f, 0f);
+
+    /// <summary>The transparents test's glass and sparks (see the class summary). The materials are
+    /// <c>Resources/Glass</c>, any premultiplied-alpha transparent shader the project ships
+    /// (<c>Sprites/Default</c>: every pipeline draws it).</summary>
+    void BuildGlass()
+    {
+        var look = Quaternion.LookRotation(GlassLook - GlassEye);
+        // A pane 1 m in front of the camera, over the right half of the picture: its edge runs
+        // down the middle of her.
+        Pane("Glass pane", GlassEye + look * new Vector3(0.6f, 0, 1f), look, new Vector2(1.2f, 1.5f), new Color(0.25f, 0.55f, 0.9f, 0.55f));
+        // A bright haze a third of a metre behind her head and shoulders.
+        Pane("Haze", new Vector3(0.05f, 1.3f, -1.0f), look, new Vector2(1.1f, 0.6f), new Color(1f, 0.95f, 0.8f, 0.8f));
+        if (foreign)
+        {
+            // The "game's" own buffer before the transparents: a red stain over her legs.
+            var stain = new CommandBuffer { name = "Testbed blood" };
+            stain.DrawMesh(WhiteQuad, Matrix4x4.TRS(GlassEye + look * new Vector3(-0.2f, -0.55f, 2.2f), look, new Vector3(0.6f, 0.35f, 1)),
+                Transparent(new Color(0.8f, 0.05f, 0.05f, 0.6f), null));
+            cam.AddCommandBuffer(CameraEvent.BeforeForwardAlpha, stain);
+        }
+        // Sparks drifting between the camera and her, and a dense cloud of them half a metre behind her.
+        Sparks("Near sparks", GlassEye + look * new Vector3(-0.2f, -0.2f, 1.7f), look, new Vector3(1.2f, 1.2f, 0.2f), new Color(1f, 0.55f, 0.1f, 0.9f), 0.07f, 40);
+        Sparks("Far sparks", new Vector3(0, 1.0f, -0.8f), look, new Vector3(3f, 2f, 0.1f), new Color(0.3f, 1f, 0.35f, 0.9f), 0.2f, 600);
+    }
+
+    static Mesh whiteQuad;
+
+    /// <summary>Unity's quad with white vertex colours (a sprite shader multiplies by them).</summary>
+    static Mesh WhiteQuad
+    {
+        get
+        {
+            if (whiteQuad != null) return whiteQuad;
+            var g = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            whiteQuad = UnityEngine.Object.Instantiate(g.GetComponent<MeshFilter>().sharedMesh);
+            whiteQuad.colors = new[] { Color.white, Color.white, Color.white, Color.white };
+            UnityEngine.Object.Destroy(g);
+            return whiteQuad;
+        }
+    }
+
+    static void Pane(string name, Vector3 at, Quaternion facing, Vector2 size, Color c)
+    {
+        var g = new GameObject(name);
+        g.AddComponent<MeshFilter>().sharedMesh = WhiteQuad;
+        g.AddComponent<MeshRenderer>().sharedMaterial = Transparent(c, null);
+        g.transform.SetPositionAndRotation(at, facing);
+        g.transform.localScale = new Vector3(size.x, size.y, 1);
+    }
+
+    void Sparks(string name, Vector3 at, Quaternion facing, Vector3 box, Color c, float size, float rate)
+    {
+        var g = new GameObject(name);
+        g.transform.SetPositionAndRotation(at, facing);
+        var ps = g.AddComponent<ParticleSystem>();
+        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var main = ps.main;
+        main.loop = true;
+        main.prewarm = true;
+        main.startLifetime = 4;
+        main.startSpeed = 0.25f;
+        main.startSize = size;
+        main.startColor = c;
+        main.maxParticles = 2000;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        var emission = ps.emission;
+        emission.rateOverTime = rate;
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Box;
+        shape.scale = box;
+        g.GetComponent<ParticleSystemRenderer>().sharedMaterial = Transparent(Color.white, Dot);
+        ps.Play();
+    }
+
+    static Material Transparent(Color c, Texture2D tex)
+    {
+        var m = new Material(Resources.Load<Material>("Glass"));
+        m.SetColor("_Color", c);
+        if (tex != null) m.SetTexture("_MainTex", tex);
+        return m;
+    }
+
+    static Texture2D dot;
+
+    /// <summary>A soft round spark.</summary>
+    static Texture2D Dot
+    {
+        get
+        {
+            if (dot != null) return dot;
+            const int N = 64;
+            dot = new Texture2D(N, N, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+            var px = new Color32[N * N];
+            for (int y = 0; y < N; y++)
+                for (int x = 0; x < N; x++)
+                {
+                    float r = new Vector2(x - N / 2 + 0.5f, y - N / 2 + 0.5f).magnitude / (N / 2);
+                    byte a = (byte)(Mathf.Clamp01(1 - r * r) * 255);
+                    px[y * N + x] = new Color32(255, 255, 255, a);
+                }
+            dot.SetPixels32(px);
+            dot.Apply();
+            return dot;
+        }
+    }
+
     void BuildDarkRoom()
     {
         // A cave's light: almost none around, and nothing of the bright sky in its reflections.
@@ -220,8 +341,9 @@ public sealed class Testbed : MonoBehaviour
 
     static Material lit;
 
-    /// <summary>A URP Lit material of colour <paramref name="c"/> (a primitive's default material is the
-    /// Built-in pipeline's, which URP draws magenta).</summary>
+    /// <summary>A material of colour <paramref name="c"/> made from <c>Resources/Lit</c> (URP Lit, or
+    /// Standard in a Built-in project: a primitive's default material is the Built-in pipeline's, which
+    /// URP draws magenta) — each property set under both pipelines' names.</summary>
     static void Paint(GameObject g, Color c) => Paint(g, c, Concrete, new Vector2(2, 2), 0.3f);
 
     static void Paint(GameObject g, Color c, Texture2D tex, Vector2 tiling, float smooth, float metal = 0)
@@ -229,12 +351,17 @@ public sealed class Testbed : MonoBehaviour
         if (lit == null) lit = Resources.Load<Material>("Lit");
         var m = new Material(lit);
         m.SetColor("_BaseColor", c);
+        m.SetColor("_Color", c);
         if (tex != null)
         {
-            m.SetTexture("_BaseMap", tex);
-            m.SetTextureScale("_BaseMap", tiling);
+            foreach (var name in new[] { "_BaseMap", "_MainTex" })
+            {
+                m.SetTexture(name, tex);
+                m.SetTextureScale(name, tiling);
+            }
         }
         m.SetFloat("_Smoothness", smooth);
+        m.SetFloat("_Glossiness", smooth);
         m.SetFloat("_Metallic", metal);
         g.GetComponent<Renderer>().sharedMaterial = m;
     }
@@ -242,7 +369,7 @@ public sealed class Testbed : MonoBehaviour
     static Texture2D floor, concrete;
 
     /// <summary>Stone tiles: grout lines, each tile its own shade, fine noise.</summary>
-    static Texture2D Floor => floor ??= MakeTexture((x, y) =>
+    static Texture2D Floor => floor != null ? floor : floor = MakeTexture((x, y) =>
     {
         int tx = x / 64, ty = y / 64;
         bool grout = x % 64 < 3 || y % 64 < 3;
@@ -252,7 +379,7 @@ public sealed class Testbed : MonoBehaviour
     });
 
     /// <summary>Concrete: two octaves of noise and a few dark flecks.</summary>
-    static Texture2D Concrete => concrete ??= MakeTexture((x, y) =>
+    static Texture2D Concrete => concrete != null ? concrete : concrete = MakeTexture((x, y) =>
     {
         float n = Mathf.PerlinNoise(x * 0.05f, y * 0.05f) * 0.15f + Mathf.PerlinNoise(x * 0.3f, y * 0.3f) * 0.08f;
         return 0.9f - n - (Hash(x, y) > 0.985f ? 0.25f : 0f);
@@ -290,6 +417,12 @@ public sealed class Testbed : MonoBehaviour
         if (dark)
         {
             DarkStep();
+            Shoot();
+            return;
+        }
+        if (glass)
+        {
+            cam.transform.SetPositionAndRotation(GlassEye, Quaternion.LookRotation(GlassLook - GlassEye));
             Shoot();
             return;
         }

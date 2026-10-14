@@ -10,8 +10,13 @@
 // depth test compares like with like. Two ways to test:
 //   pass 0 "Composite": against the game's depth TEXTURE (Built-in, URP) — two-way, soft;
 //   pass 1 "CompositeZ": by the GPU against the camera's depth BUFFER bound with the target — she
-//     writes her own depth (SV_Depth). For a pipeline whose depth texture this shader cannot read
-//     (HDRP's mip-pyramid atlas), from a pass that binds the camera's depth buffer.
+//     outputs her own depth (SV_Depth) for the test, and writes none. For a pipeline whose depth
+//     texture this shader cannot read (HDRP's mip-pyramid atlas), from a pass that binds the camera's
+//     depth buffer.
+//   pass 2 "HerDepth": her depth alone, exactly pass 1's, WRITTEN where she is solid (alpha 1/2 and
+//     up). Drawn beside pass 1 inside a camera's render, before its transparent objects: a particle
+//     or a pane of glass in front of her is then blended over her, and one behind her fails the
+//     depth test where she stands.
 Shader "Hidden/Astra/Composite"
 {
     HLSLINCLUDE
@@ -131,18 +136,39 @@ Shader "Hidden/Astra/Composite"
         return c * visible;
     }
 
-    // The camera's depth buffer does the test: she writes the device depth of her point, pulled
-    // toward the camera by the bias so her feet do not fight the ground.
-    float4 FragDepthBuffer(Varyings i, out float depth : SV_Depth) : SV_Target
+    // The device depth of her point `depthNow` metres along this pixel's view, pulled toward the
+    // camera by the bias so her feet do not fight the ground.
+    float DeviceDepth(Varyings i, float depthNow)
     {
-        float depthNow;
-        float4 c = Her(i, depthNow);
         float z = max(depthNow - _AstraTest.y, 1e-3);
         // Her point at that distance along this pixel's ray, through the camera's projection.
         float2 ndc = i.uv * 2 - 1;
         float3 p = float3((ndc + _AstraProjNow.zw) / _AstraProjNow.xy, 1) * z;
         float4 clip = mul(_AstraGpuProj, float4(p.xy, -p.z, 1));
-        depth = saturate((clip.z / clip.w - _AstraZNdc.y) / _AstraZNdc.x);
+        return saturate((clip.z / clip.w - _AstraZNdc.y) / _AstraZNdc.x);
+    }
+
+    // The camera's depth buffer does the test.
+    float4 FragDepthBuffer(Varyings i, out float depth : SV_Depth) : SV_Target
+    {
+        float depthNow;
+        float4 c = Her(i, depthNow);
+        depth = DeviceDepth(i, depthNow);
+        return c;
+    }
+
+    // Pass 1's depth where she is solid; her soft edge writes none, so it never stamps a hard
+    // outline into what is drawn behind her. The colour is masked off (ColorMask 0). Spelled out
+    // with the alpha test before the depth: a helper handing back her colour and depth together,
+    // tested after, makes the shader compiler (FXC, which every graphics API's code here goes
+    // through) fail with "argument pulled into unrelated predicate" — and the pass silently left
+    // out of the bundle made the whole shader unsupported (the bundle build now refuses that).
+    float4 FragHerDepth(Varyings i, out float depth : SV_Depth) : SV_Target
+    {
+        float depthNow;
+        float4 c = Her(i, depthNow);
+        clip(c.a - 0.5);
+        depth = DeviceDepth(i, depthNow);
         return c;
     }
     ENDHLSL
@@ -172,6 +198,18 @@ Shader "Hidden/Astra/Composite"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment FragDepthBuffer
+            ENDHLSL
+        }
+        Pass
+        {
+            Name "HerDepth"
+            ZTest LEqual
+            ZWrite On
+            ColorMask 0
+            Cull Off
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment FragHerDepth
             ENDHLSL
         }
     }

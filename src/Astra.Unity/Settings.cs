@@ -31,6 +31,7 @@ namespace Astra.Unity
         public ConfigEntry<string> ColourSpace;
         public ConfigEntry<int> MaxPictureHeight;
         public ConfigEntry<bool> BeforePostProcessing;
+        public ConfigEntry<string> BeforeTransparents;
         public ConfigEntry<bool> SendLight;
         public ConfigEntry<bool> Shadows;
 
@@ -76,6 +77,8 @@ namespace Astra.Unity
                 MaxPictureHeight = c.Bind("Picture", "MaxHeight", 1080, "Her picture's height at most (the game's aspect is kept). Lower = cheaper."),
                 BeforePostProcessing = c.Bind("Picture", "BeforePostProcessing", true,
                     "URP 2022-2023 and Built-in games: draw her inside the camera, before the game's post-processing, tested against its depth buffer, so walls drawn with any shader hide her and the game's look is on her too. Off = over the finished frame, tested against the depth texture."),
+                BeforeTransparents = c.Bind("Picture", "BeforeTransparents", "auto",
+                    "With BeforePostProcessing: where among the game's transparent objects she is drawn. before = before them, writing her depth, so particles, glass and water in front of her cover her; after = after them, over every one (Astra 0.6.1). auto = before, except in a Built-in game that runs its own effects there (a command buffer at BeforeForwardAlpha): after."),
                 SendLight = c.Bind("Picture", "SendLight", true, "Light her with this game's sun and sky."),
                 Shadows = c.Bind("Picture", "Shadows", true,
                     "Let this game's own lights cast her shadow (a copy of her body that only casts shadows, never drawn)."),

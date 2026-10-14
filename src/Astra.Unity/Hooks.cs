@@ -68,10 +68,10 @@ namespace Astra.Unity
         public string Compositing(bool beforePostProcessing) =>
             !Srp
                 ? beforePostProcessing
-                    ? "compositing inside the main camera's Built-in render, right after its transparent objects and before its image effects (the game's look is on her too)"
+                    ? "compositing inside the main camera's Built-in render, before its image effects (the game's look is on her too)"
                     : "compositing after the main camera's image effects (Built-in), against its depth texture"
                 : UrpHook.Active && !Application.unityVersion.StartsWith("6000.", StringComparison.Ordinal)
-                ? "compositing inside the camera's URP render, after its transparent objects, before post-processing (the game's look is on her too)"
+                ? "compositing inside the camera's URP render, before its post-processing (the game's look is on her too)"
                 : UrpHook.Active ? $"compositing inside the camera's URP 17 render ({(UrpHook.RenderGraph ? "render graph" : "Compatibility Mode")}), after post-processing"
                 : HdrpHook.Active ? "compositing in an HDRP custom pass, against the camera's depth buffer"
                 : $"compositing after {(ContextEnd ? "the frame's cameras" : "the camera")} ({(Hdrp ? HdrpHook.Missing : UrpHook.Missing)})";

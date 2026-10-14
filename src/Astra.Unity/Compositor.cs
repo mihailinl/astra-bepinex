@@ -41,6 +41,8 @@ namespace Astra.Unity
         bool motionSaid;
         // attached's buffer count when hers was last kept first, and the frame of the next check anyway.
         int seenBuffers = -1, nextOrderCheck;
+        Camera foreignCam;           // the camera ForeignBeforeAlpha last looked at
+        int foreignCount = -1, foreignNext, foreignThere;
         // Frames numbered up to this belong to an earlier session (see Reset).
         long floor;
         // The main camera's depth, kept at its end for a draw at the end of the whole context (KeepDepth).
@@ -104,9 +106,47 @@ namespace Astra.Unity
         public Material Material => mat;
 
         /// <summary>The shader pass that tests her against the camera's depth BUFFER bound with the
-        /// target (she writes SV_Depth): for an adapter whose pipeline's depth texture this shader
-        /// cannot read (HDRP). Pass 0 tests against the depth texture.</summary>
+        /// target (she outputs SV_Depth for the test and writes none): for an adapter whose pipeline's
+        /// depth texture this shader cannot read (HDRP). Pass 0 tests against the depth texture.</summary>
         public const int DepthBufferPass = 1;
+
+        /// <summary>The shader pass that WRITES her depth (exactly <see cref="DepthBufferPass"/>'s,
+        /// where she is solid; no colour). Drawn right after that pass by a draw INSIDE the camera's
+        /// render before its transparent objects, so those in front of her are blended over her and
+        /// those behind her are hidden where she stands. After it rather than before, so her colour
+        /// never depends on two shader programs computing the same depth to the last bit.</summary>
+        public const int HerDepthPass = 2;
+
+        /// <summary>[Picture] BeforeTransparents: "before", "after", or anything else = auto.</summary>
+        string TransparentsOrder => (settings?.BeforeTransparents?.Value ?? "").Trim().ToLowerInvariant();
+
+        /// <summary>For a pipeline adapter drawing inside the camera's render (URP 13–16): before the
+        /// camera's transparent objects, writing her depth (<see cref="HerDepthPass"/>) — unless
+        /// [Picture] BeforeTransparents says "after" (over every one of them, as Astra 0.6.1 drew).
+        /// Said once each way.</summary>
+        public bool SrpBeforeTransparents()
+        {
+            bool before = TransparentsOrder != "after";
+            SayOnce(before
+                ? "URP: drawn right before the camera's transparent objects, writing her depth: those in front of her cover her"
+                : "URP: drawn after the camera's transparent objects, over every one ([Picture] BeforeTransparents = after)");
+            return before;
+        }
+
+        /// <summary>How many command buffers of the game's own <paramref name="cam"/> runs at
+        /// BeforeForwardAlpha (-1: this build cannot tell), looked at again whenever the camera's
+        /// buffers change and once a second (a buffer swapped for another leaves the count).</summary>
+        int ForeignBeforeAlpha(Camera cam)
+        {
+            if (cam != foreignCam || cam.commandBufferCount != foreignCount || Time.frameCount >= foreignNext)
+            {
+                foreignThere = Compat.ForeignBuffers(cam, CameraEvent.BeforeForwardAlpha, cmd);
+                foreignCam = cam;
+                foreignCount = cam.commandBufferCount;
+                foreignNext = Time.frameCount + 60;
+            }
+            return foreignThere;
+        }
 
         static readonly int IdColour = Shader.PropertyToID("_AstraColour");
         static readonly int IdDepth = Shader.PropertyToID("_AstraDepth");
@@ -521,9 +561,15 @@ namespace Astra.Unity
         /// <summary>
         /// The Built-in pipeline: <paramref name="cam"/> draws her itself, from a command buffer kept
         /// FIRST at one of its camera events. With <c>Picture.BeforePostProcessing</c> (the default) that
-        /// is right after its transparent objects, INSIDE its render: into whatever it drew them into,
-        /// tested by the GPU against its depth BUFFER (shader pass 1) — every wall that writes depth
-        /// hides her, whatever its shader — and the game's image effects then apply to her too.
+        /// is INSIDE its render, tested by the GPU against its depth BUFFER (shader pass 1) — every wall
+        /// that writes depth hides her, whatever its shader — and the game's image effects apply to her
+        /// too: right BEFORE its transparent objects, into what it drew its opaque world and sky into,
+        /// with her depth then written into it (pass 2), so the particles and glass drawn after her
+        /// cover her where they are in front and are hidden where they are behind. But a game that runs
+        /// a command buffer of its own at that event (ULTRAKILL's blood and oil: stains composited over
+        /// the frame from the depth buffer) would paint its effect over her — then, and when
+        /// [Picture] BeforeTransparents says so, right AFTER its transparent objects (pass 1 only, over
+        /// every one of them: Astra 0.6.1's point).
         /// Otherwise, or when the camera renders into a texture with no depth buffer, after its image
         /// effects, tested against its depth texture (switched on for it), which holds only what casts
         /// shadows. Call before it renders (pre-cull): this records what that buffer draws this frame.
@@ -542,7 +588,10 @@ namespace Astra.Unity
             var ours = addedDepthBit && attached == cam ? DepthTextureMode.Depth : DepthTextureMode.None;
             bool gameReadsDepth = ((cam.depthTextureMode & ~ours) & (DepthTextureMode.Depth | DepthTextureMode.DepthNormals)) != 0;
             bool inside = settings.BeforePostProcessing.Value && !gameReadsDepth && !(cam.targetTexture != null && cam.targetTexture.depth == 0);
-            var evt = inside ? CameraEvent.AfterForwardAlpha : CameraEvent.AfterImageEffects;
+            string order = TransparentsOrder;
+            int foreign = inside && order != "before" && order != "after" ? ForeignBeforeAlpha(cam) : 0;
+            bool beforeAlpha = inside && order != "after" && (order == "before" || foreign == 0);
+            var evt = !inside ? CameraEvent.AfterImageEffects : beforeAlpha ? CameraEvent.BeforeForwardAlpha : CameraEvent.AfterForwardAlpha;
             if (attached != cam || attachedEvt != evt)
             {
                 DetachBuiltIn();
@@ -554,8 +603,14 @@ namespace Astra.Unity
                 attached = cam;
                 attachedEvt = evt;
                 seenBuffers = -1; // put on the camera just below
-                SayOnce(inside
-                    ? $"Built-in: drawn inside '{cam.name}' right after its transparent objects, tested against its depth buffer (the game's image effects apply to her)"
+                SayOnce(beforeAlpha
+                    ? $"Built-in: drawn inside '{cam.name}' right before its transparent objects, tested against its depth buffer and writing hers: those in front of her cover her (the game's image effects apply to her)"
+                        + (order == "before" ? " — [Picture] BeforeTransparents = before" : "")
+                    : inside
+                    ? $"Built-in: drawn inside '{cam.name}' right after its transparent objects, over every one, tested against its depth buffer (the game's image effects apply to her) — "
+                        + (order == "after" ? "[Picture] BeforeTransparents = after"
+                            : foreign > 0 ? $"the game runs {foreign} command buffer(s) of its own before them, whose effects would cover her"
+                            : "this game's build cannot list the camera's command buffers")
                     : gameReadsDepth && settings.BeforePostProcessing.Value
                         ? $"Built-in: '{cam.name}' renders a depth texture for the game's own effects — drawn after them, tested against it"
                         : $"Built-in: drawn into '{cam.name}' after its image effects, tested against its depth texture (walls whose shaders cast no shadows do not hide her)");
@@ -580,9 +635,10 @@ namespace Astra.Unity
                     + "behind her — if she smears, set [Picture] BeforePostProcessing = false");
             }
             // Kept first whenever the camera's buffers change — a game may take every buffer off an
-            // event when it rebuilds its own (ULTRAKILL does at AfterForwardAlpha on a resolution
-            // change), and hers with them — and once a second anyway: a buffer swapped for another
-            // leaves the count as it was.
+            // event when it rebuilds its own (ULTRAKILL removes everything at AfterForwardAlpha, hers
+            // with it, on a resolution change: she is there because it runs its blood-and-oil buffer at
+            // BeforeForwardAlpha) — and once a second anyway: a buffer swapped for another leaves the
+            // count as it was.
             if (cam.commandBufferCount != seenBuffers || Time.frameCount >= nextOrderCheck)
             {
                 bool first = Compat.KeepFirst(cam, evt, cmd, out bool moved, out string why);
@@ -595,7 +651,7 @@ namespace Astra.Unity
             // After the image effects, Built-in binds the depth texture switched on above for the
             // camera's render; inside, pass 1 reads no texture at all.
             if (!Show || !Prepare(cam, srp: false, cam.targetTexture != null, depthTest: true, block)) return;
-            // Inside: NO target of her own. The buffer inherits what the camera drew its transparent
+            // Inside: NO target of her own. The buffer inherits what the camera draws its transparent
             // objects into — the back buffer, an HDR, MSAA or deferred intermediate, or a game's own
             // SetTargetBuffers — with its depth buffer and its viewport, and the flip follows it
             // (_ProjectionParams, set by Unity for this render).
@@ -608,6 +664,7 @@ namespace Astra.Unity
             // thing as before).
             if (!inside) cmd.SetRenderTarget(BuiltinRenderTextureType.CurrentActive);
             cmd.DrawProcedural(Matrix4x4.identity, mat, inside ? DepthBufferPass : 0, MeshTopology.Triangles, 3, 1, block);
+            if (beforeAlpha) cmd.DrawProcedural(Matrix4x4.identity, mat, HerDepthPass, MeshTopology.Triangles, 3, 1, block);
         }
 
         /// <summary>Undo <see cref="PrepareBuiltIn"/>'s camera changes (M6): the command buffer, and
