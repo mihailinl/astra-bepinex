@@ -9,7 +9,8 @@
 #   without any adapter's references or the IL2CPP interop (its first argument, or
 #   IL2CPP_INTEROP_DIR; URP17_REF_DIR may be left out where the testbed has been opened or built), so
 #   the SDK and template packages it leaves in artifacts/nuget are the release's (both halves, the
-#   plain version). Its build log stays in artifacts/pack.log.
+#   plain version) — the only ones there, since pack.sh empties it first: run
+#   make-runner-il2cpp-gi.sh BEFORE this one. Its build log stays in artifacts/pack.log.
 #   BEPINEX_DIST=<dir>  an unpacked BepInEx_win_x64_5.4.23.5.zip (default: fetched and verified here)
 set -euo pipefail
 cd "$(dirname "$0")/.."

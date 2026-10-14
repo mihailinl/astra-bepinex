@@ -83,10 +83,19 @@ fi
 RELEASE=true
 for part in urp17 urp14 hdrp il2cpp; do [[ "$REQUIRE" == *" $part "* ]] || RELEASE=false; done
 SDK_FLAGS=(-p:AstraRelease=$RELEASE -p:AstraSdkIl2Cpp=$([ -n "${ok[il2cpp]:-}" ] && echo true || echo false))
+# artifacts/nuget holds THIS run's two packages and nothing else: an older run's -dev, -mono-dev or
+# release package beside them is one a release could upload by mistake.
+rm -f artifacts/nuget/*.nupkg artifacts/nuget/*.snupkg
 dotnet pack src/Astra.Unity.Sdk -c Release -v q "${SDK_FLAGS[@]}"
 dotnet pack templates/Astra.Unity.Templates.csproj -c Release -v q -p:AstraRelease=$RELEASE
 SDK_VERSION=$(dotnet msbuild src/Astra.Unity.Sdk -getProperty:PackageVersion "${SDK_FLAGS[@]}")
 TEMPLATES_VERSION=$(dotnet msbuild templates/Astra.Unity.Templates.csproj -getProperty:PackageVersion -p:AstraRelease=$RELEASE)
+expected=$(printf '%s\n' "Astra.Unity.Sdk.$SDK_VERSION.nupkg" "Astra.Unity.Templates.$TEMPLATES_VERSION.nupkg" | sort)
+found=$(cd artifacts/nuget && ls | sort)
+if [ "$found" != "$expected" ]; then
+  echo "pack.sh: artifacts/nuget holds '$(echo $found)', not exactly this run's '$(echo $expected)'" >&2
+  exit 1
+fi
 
 # The foundation as it is installed in a game: BepInEx/plugins/Astra/…
 for flavour in mono il2cpp; do

@@ -17,7 +17,8 @@ bash tools/check-runner-version.sh runner/il2cpp/astra-gi.toml
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 mkdir -p artifacts
 # pack.sh's build output goes to a log; on a failure, its errors are shown. Its SDK and template
-# packages are -dev prereleases (only tools/make-runner-gi.sh's full build makes a release's).
+# packages are -dev prereleases (only tools/make-runner-gi.sh's full build makes a release's), and
+# pack.sh empties artifacts/nuget first: for a release, run this script BEFORE make-runner-gi.sh.
 if ! ASTRA_PACK_REQUIRE=il2cpp bash tools/pack.sh "${1:-}" > artifacts/pack-il2cpp.log; then
   grep -E ': error ' artifacts/pack-il2cpp.log | sed 's/ \[[^]]*\]$//' | sort -u >&2 || tail -20 artifacts/pack-il2cpp.log >&2
   echo "${0##*/}: tools/pack.sh failed (artifacts/pack-il2cpp.log)" >&2; exit 1

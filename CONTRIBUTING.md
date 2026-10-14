@@ -165,12 +165,14 @@ BepInEx and check its digest, and refuse a runner manifest whose `version` is no
 (`ASTRA_PACK_REQUIRE=all`): it needs all three adapters (`URP17_REF_DIR`, `URP14_REF_DIR`,
 `HDRP_REF_DIR`) and an interop that keeps everything (its first argument, or `IL2CPP_INTEROP_DIR`),
 and the SDK and template packages it leaves in `artifacts/nuget` are the release's. The IL2CPP
-runner needs only the interop; its packages are `-dev`. Each keeps its build log in `artifacts/`.
+runner needs only the interop; its packages are `-dev`. `pack.sh` empties `artifacts/nuget` before
+it packs, so it only ever holds the last run's two packages: run the IL2CPP runner FIRST. Each keeps
+its build log in `artifacts/`.
 
 ```bash
 I=~/.local/share/astra/games/3164500/BepInEx/interop
-URP17_REF_DIR=… URP14_REF_DIR=… HDRP_REF_DIR=… tools/make-runner-gi.sh "$I"
 tools/make-runner-il2cpp-gi.sh "$I"
+URP17_REF_DIR=… URP14_REF_DIR=… HDRP_REF_DIR=… tools/make-runner-gi.sh "$I"
 ```
 
 ### Releasing
@@ -178,7 +180,8 @@ tools/make-runner-il2cpp-gi.sh "$I"
 Releases are the maintainers' job; you rarely need this.
 
 1. Set the version in `Directory.Build.props` and in both `runner/*/astra-gi.toml`.
-2. Run both release scripts (above), the Mono one first.
+2. Run both release scripts (above), the IL2CPP one first: the Mono one's full build leaves the
+   release's packages, and only them, in `artifacts/nuget`.
 3. Publish the GitHub release `v<version>` with `artifacts/astra-gi.zip`,
    `artifacts/astra-gi-il2cpp.zip` and `artifacts/nuget/Astra.Unity.Sdk.<version>.nupkg` (the one
    without a suffix).
