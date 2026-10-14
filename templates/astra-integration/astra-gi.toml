@@ -4,7 +4,7 @@ schema = 1
 
 [integration]                      # metadata: shown to the player, never acted on
 id = "astra.integration-id"
-name = "Astra for GAME_NAME"
+name = "Astra for STR_GAME"
 version = "0.1.0"                  # = <Version> in AstraIntegration.csproj and version in astra-item.toml
 authors = ["GITHUB_OWNER"]
 license = "MIT"                    # = LICENSE

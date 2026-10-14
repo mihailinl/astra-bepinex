@@ -8,7 +8,7 @@ using UnityEngine;
 namespace AstraIntegration
 {
     /// <summary>
-    /// Astra for GAME_NAME. The Astra foundation already makes her work here: she follows the player
+    /// Astra for XML_GAME. The Astra foundation already makes her work here: she follows the player
     /// through the game's colliders, is lit by its sun and hidden by its walls. This plugin makes her
     /// better in THIS game. Replace only what you know better; every point has a working default.
     /// </summary>
@@ -26,7 +26,7 @@ namespace AstraIntegration
 
         static void Setup()
         {
-            var astra = AstraSdk.Register(MyPluginInfo.PLUGIN_GUID, "GAME_NAME");
+            var astra = AstraSdk.Register(MyPluginInfo.PLUGIN_GUID, "STR_GAME");
 
             // Her size: as tall as 95% of the player, once the player's height is known
             // (Player.Height below), else a fixed scale.

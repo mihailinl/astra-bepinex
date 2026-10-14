@@ -55,7 +55,7 @@ for more Unity lines, robustness for IL2CPP builds, and new integrations.
 | `templates/` | The `dotnet new astra-integration` template: a releasable integration repository (manifest, fetch and zip scripts, release workflow). Its `tools/fetch.sh` pins the foundation release it builds against by digest: bump it with each release. |
 | `tests/Astra.Bridge.Core.Tests` | xUnit tests for `Astra.Bridge.Core` (plus two end-to-end tests that need an engine). |
 | `tests/TestbedIntegration` | An integration made from the template, for the testbed. It compiles against this checkout's foundation, not the SDK package. |
-| `tools/` | `pack.sh` (build everything), `build-bundles.sh` (shader bundles), `check-game-members/` (metadata checks against a game), `make-runner-gi.sh` and `make-runner-il2cpp-gi.sh` (the release zips), `check-runner-version.sh` and `pin-template.sh` ([releasing](#releasing)), `check-protocol-sync.sh` (`docs/PROTOCOL.md` against the engine's `BRIDGE.md`). |
+| `tools/` | `pack.sh` (build everything), `build-bundles.sh` (shader bundles), `check-game-members/` (metadata checks against a game), `make-runner-gi.sh` and `make-runner-il2cpp-gi.sh` (the release zips), `check-runner-version.sh` and `pin-template.sh` ([releasing](#releasing)), `check-template.sh` (generates, builds and packs repositories from the template, with hostile names), `check-protocol-sync.sh` (`docs/PROTOCOL.md` against the engine's `BRIDGE.md`). |
 | `unity/AstraShaders` | The composite shader (`Assets/Astra/AstraComposite.shader`), its bundle builder (`Assets/Editor/BuildBundles.cs`) and the committed bundles (`Build/`). |
 | `unity/AstraTestbed`, `unity/com.astra.testbed` | The testbed: a tiny URP game built in code (Unity 6000.3.18f1). |
 | `runner/` | The manifests of "Astra for any Unity game" (Mono, and `il2cpp/`). |
@@ -401,6 +401,8 @@ Checklist:
 - [ ] A new setting is in the README's settings table; a closed follow-up is marked in
       `docs/RENDER-CASES.md`.
 - [ ] No game files, no interop, no built DLLs. Bundles only with the editor version (rule 4).
+- [ ] A change to `templates/`: `tools/check-template.sh` passes (it needs the network for
+      `tools/fetch.sh`, and installs the template into a private cache, never yours).
 - [ ] The protocol changes only in the engine's `BRIDGE.md`; `docs/PROTOCOL.md` follows it
       (`tools/check-protocol-sync.sh --write`, with the engine checked out beside this repository or
       `ASTRA_ENGINE_DIR` set; the check prints SKIP without one).

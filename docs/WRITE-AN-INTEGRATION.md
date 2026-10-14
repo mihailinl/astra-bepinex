@@ -72,11 +72,11 @@ cd AstraMyGame && git init      # your new repository
 | option | meaning |
 |---|---|
 | `-n` | the project, assembly and folder name |
-| `--game` | the game's name as players know it (required) |
+| `--game` | the game's name as players know it (required; in code and manifests a `"` becomes `'` and a `\` is dropped) |
 | `--steamAppId` | the game's Steam app id; its store page address has it (required) |
-| `--id` | your integration's id: its BepInEx GUID, and the id in `astra-gi.toml` (`astra.<game>`) |
+| `--id` | your integration's id: its BepInEx GUID, and the id in `astra-gi.toml` (`astra.<game>`; letters, digits, `.`, `_`, `-`) |
 | `--runtime` | `mono` (BepInEx 5) or `il2cpp` (BepInEx 6, [step 11](#11-il2cpp-integrations)) |
-| `--owner` | the GitHub user or organisation that will own the repository: its address in `astra-gi.toml`, the author, the `LICENSE`'s copyright |
+| `--owner` | the GitHub user or organisation that will own the repository: its address in `astra-gi.toml`, the author, the `LICENSE`'s copyright (letters, digits, `-`) |
 | `--exe` | the game's executable, relative to its folder (default: `<game>.exe`) |
 | `--gameDir` | the game's folder; leave it out (see below) |
 

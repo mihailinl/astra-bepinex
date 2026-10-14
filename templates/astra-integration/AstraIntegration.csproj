@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Astra for GAME_NAME: a game integration on the Astra Unity foundation.
+  <!-- A game integration on the Astra Unity foundation.
        The foundation is installed in the game once and updates by itself, so it is referenced
        COMPILE-ONLY here (ExcludeAssets="runtime") and never shipped with this plugin. The game's own
        assemblies are referenced from its install folder, also never shipped: set GameDir below,
@@ -18,7 +18,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <BepInExPluginGuid>astra.integration-id</BepInExPluginGuid>
-    <BepInExPluginName>Astra for GAME_NAME</BepInExPluginName>
+    <BepInExPluginName>Astra for XML_GAME</BepInExPluginName>
     <!-- This integration's version: keep it equal to [integration].version in astra-gi.toml and
          version in astra-item.toml (the release workflow checks all three against the tag). -->
     <Version>0.1.0</Version>
