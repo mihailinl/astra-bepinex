@@ -24,7 +24,7 @@ public sealed class Plugin : BaseUnityPlugin
         var astra = AstraSdk.Register("astra.mygame", "My Game");
         astra.Defaults.MatchPlayerHeight = 0.95f;
         astra.OnFrame(f => f.Params.Set("swimming", MyGame.Player.InWater));
-        astra.DeclareParam("swimming", ParamType.Bool);   // SDK newer than 0.6.1 (using Astra.Bridge;)
+        astra.DeclareParam("swimming", ParamType.Bool);   // SDK 0.7.0+ (using Astra.Bridge;)
     }
 }
 ```

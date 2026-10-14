@@ -47,7 +47,7 @@ namespace AstraIntegration
             // What a fact means is her animation set's business, so a pack author can animate it.
             // List each one in README.md.
             // astra.OnFrame(f => f.Params.Set("swimming", MyGame.LocalPlayer.InWater));
-            // With an SDK newer than 0.6.1, also declare it (using Astra.Bridge;), so Astra can show
+            // With SDK 0.7.0+ (<AstraVersion>), also declare it (using Astra.Bridge;), so Astra can show
             // the player what this game sends: astra.DeclareParam("swimming", ParamType.Bool);
 
             // Animation by name on a game event: astra.Cues.Play("wave");

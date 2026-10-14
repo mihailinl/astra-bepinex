@@ -55,7 +55,7 @@ for more Unity lines, robustness for IL2CPP builds, and new integrations.
 | `templates/` | The `dotnet new astra-integration` template: a releasable integration repository (manifest, fetch and zip scripts, release workflow). Its `tools/fetch.sh` pins the foundation release it builds against by digest: bump it with each release. |
 | `tests/Astra.Bridge.Core.Tests` | xUnit tests for `Astra.Bridge.Core` (plus two end-to-end tests that need an engine). |
 | `tests/TestbedIntegration` | An integration made from the template, for the testbed. It compiles against this checkout's foundation, not the SDK package. |
-| `tools/` | `pack.sh` (build everything), `build-bundles.sh` (shader bundles), `check-game-members/` (metadata checks against a game), `make-runner-gi.sh` and `make-runner-il2cpp-gi.sh` (the release zips), `check-protocol-sync.sh` (`docs/PROTOCOL.md` against the engine's `BRIDGE.md`). |
+| `tools/` | `pack.sh` (build everything), `build-bundles.sh` (shader bundles), `check-game-members/` (metadata checks against a game), `make-runner-gi.sh` and `make-runner-il2cpp-gi.sh` (the release zips), `check-runner-version.sh` and `pin-template.sh` ([releasing](#releasing)), `check-protocol-sync.sh` (`docs/PROTOCOL.md` against the engine's `BRIDGE.md`). |
 | `unity/AstraShaders` | The composite shader (`Assets/Astra/AstraComposite.shader`), its bundle builder (`Assets/Editor/BuildBundles.cs`) and the committed bundles (`Build/`). |
 | `unity/AstraTestbed`, `unity/com.astra.testbed` | The testbed: a tiny URP game built in code (Unity 6000.3.18f1). |
 | `runner/` | The manifests of "Astra for any Unity game" (Mono, and `il2cpp/`). |
@@ -92,7 +92,7 @@ package, and lays out the foundation as it is installed in a game:
 ```
 artifacts/foundation-mono/BepInEx/plugins/Astra/     Astra.Unity.dll, Astra.Bridge.Core.dll, the adapters, astra-item.json
 artifacts/foundation-il2cpp/BepInEx/plugins/Astra/   Astra.Unity.dll, Astra.Bridge.Core.dll, astra-item.json
-artifacts/nuget/                                     Astra.Unity.Sdk.<version>.nupkg, Astra.Unity.Templates.<version>.nupkg
+artifacts/nuget/                                     Astra.Unity.Sdk.<version>-dev.nupkg, Astra.Unity.Templates.<version>-dev.nupkg
 ```
 
 The adapters and the IL2CPP plugin compile against assemblies that have no NuGet package. You point
@@ -101,6 +101,13 @@ without its folder is left out**, and `pack.sh` ends by listing what it left out
 and the variable that brings it back. So a fresh clone runs `tools/pack.sh` as it is and gets the Mono
 foundation without adapters, a Mono-only SDK package and the template package: enough to work on
 the foundation, never a release.
+
+**Package versions.** Only a release build (`ASTRA_PACK_REQUIRE=all`) packs the SDK and the template
+package under the foundation's version (`Directory.Build.props`). Every other run packs
+`<version>-dev`, and a run without the IL2CPP plugin packs the SDK as `<version>-mono-dev` (it has
+no `net6.0` half). A local pack therefore never has the id and version of a published package, so it
+can never stand in for one in anyone's NuGet cache. NuGet caches a `-dev` package too: after
+re-packing one, delete `~/.nuget/packages/astra.unity.sdk/<version>-dev` before you restore against it.
 
 | for | set | point it at | without it |
 |---|---|---|---|
@@ -153,16 +160,32 @@ other missing type fails the build with a compiler error that names it; isolate 
 
 `tools/make-runner-gi.sh` and `tools/make-runner-il2cpp-gi.sh` lay out the release zips of "Astra
 for any Unity game" (`artifacts/astra-gi.zip`, `artifacts/astra-gi-il2cpp.zip`). They download
-BepInEx and check its digest. They run `tools/pack.sh` with `ASTRA_PACK_REQUIRE`: the Mono runner
-needs all three adapters (`URP17_REF_DIR`, `URP14_REF_DIR`, `HDRP_REF_DIR`), and the IL2CPP runner an
-interop that keeps everything (its first argument, or `IL2CPP_INTEROP_DIR`):
+BepInEx and check its digest, and refuse a runner manifest whose `version` is not the foundation's
+(`tools/check-runner-version.sh`). The Mono runner's run is the release's FULL build
+(`ASTRA_PACK_REQUIRE=all`): it needs all three adapters (`URP17_REF_DIR`, `URP14_REF_DIR`,
+`HDRP_REF_DIR`) and an interop that keeps everything (its first argument, or `IL2CPP_INTEROP_DIR`),
+and the SDK and template packages it leaves in `artifacts/nuget` are the release's. The IL2CPP
+runner needs only the interop; its packages are `-dev`. Each keeps its build log in `artifacts/`.
 
 ```bash
-URP17_REF_DIR=… URP14_REF_DIR=… HDRP_REF_DIR=… tools/make-runner-gi.sh
-tools/make-runner-il2cpp-gi.sh ~/.local/share/astra/games/3164500/BepInEx/interop
+I=~/.local/share/astra/games/3164500/BepInEx/interop
+URP17_REF_DIR=… URP14_REF_DIR=… HDRP_REF_DIR=… tools/make-runner-gi.sh "$I"
+tools/make-runner-il2cpp-gi.sh "$I"
 ```
 
-Releases are the maintainers' job; you rarely need these.
+### Releasing
+
+Releases are the maintainers' job; you rarely need this.
+
+1. Set the version in `Directory.Build.props` and in both `runner/*/astra-gi.toml`.
+2. Run both release scripts (above), the Mono one first.
+3. Publish the GitHub release `v<version>` with `artifacts/astra-gi.zip`,
+   `artifacts/astra-gi-il2cpp.zip` and `artifacts/nuget/Astra.Unity.Sdk.<version>.nupkg` (the one
+   without a suffix).
+4. Once it is published, `tools/pin-template.sh <version>` and commit. It moves the integration
+   template to that release in one step: `<AstraVersion>` in its `.csproj`, the release's digests in
+   its `tools/fetch.sh`, and the range in its `astra-item.toml`. Until then the template builds
+   against the release before, which is what its users can download.
 
 ### The testbed
 

@@ -17,6 +17,9 @@
     <NoDefaultExcludes>true</NoDefaultExcludes>
     <NoWarn>$(NoWarn);NU5128</NoWarn>
     <PackageOutputPath>$(MSBuildThisFileDirectory)../artifacts/nuget</PackageOutputPath>
+    <!-- Not a release (AstraRelease=true, tools/pack.sh under ASTRA_PACK_REQUIRE=all): a prerelease
+         package version, never the one a published package has. -->
+    <PackageVersion Condition="'$(AstraRelease)' != 'true'">$(Version)-dev</PackageVersion>
   </PropertyGroup>
   <ItemGroup>
     <Content Include="astra-integration/**/*" Exclude="astra-integration/**/bin/**;astra-integration/**/obj/**" />

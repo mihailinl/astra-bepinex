@@ -13,11 +13,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 BEPINEX6_URL="https://builds.bepinex.dev/projects/bepinex_be/788/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.788%2B5b766a3.zip"
 BEPINEX6_SHA256=f4cc496bd098a0df4164b81e3737297707f13a47c2478dba2f60eefab784817a
+bash tools/check-runner-version.sh runner/il2cpp/astra-gi.toml
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
-# pack.sh's build output goes to a log; on a failure, its errors are shown.
-if ! ASTRA_PACK_REQUIRE=il2cpp bash tools/pack.sh "${1:-}" > "$OUT/pack.log"; then
-  grep -E ': error ' "$OUT/pack.log" | sed 's/ \[[^]]*\]$//' | sort -u >&2 || tail -20 "$OUT/pack.log" >&2
-  echo "${0##*/}: tools/pack.sh failed" >&2; exit 1
+mkdir -p artifacts
+# pack.sh's build output goes to a log; on a failure, its errors are shown. Its SDK and template
+# packages are -dev prereleases (only tools/make-runner-gi.sh's full build makes a release's).
+if ! ASTRA_PACK_REQUIRE=il2cpp bash tools/pack.sh "${1:-}" > artifacts/pack-il2cpp.log; then
+  grep -E ': error ' artifacts/pack-il2cpp.log | sed 's/ \[[^]]*\]$//' | sort -u >&2 || tail -20 artifacts/pack-il2cpp.log >&2
+  echo "${0##*/}: tools/pack.sh failed (artifacts/pack-il2cpp.log)" >&2; exit 1
 fi
 if [ -z "${BEPINEX6_ZIP:-}" ]; then
   BEPINEX6_ZIP="$OUT/bepinex6.zip"

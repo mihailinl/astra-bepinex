@@ -414,7 +414,7 @@ set's default. `Params` is cleared every frame, so set every fact every frame.
 **Declare every parameter you send**, where you register:
 
 ```csharp
-using Astra.Bridge;   // ParamType
+using Astra.Bridge;   // ParamType — SDK 0.7.0 and newer
 
 var astra = AstraSdk.Register("astra.mygame", "My Game")
     .DeclareParam("climbing", ParamType.Bool)
@@ -427,8 +427,9 @@ integration id, so a player sees what your game sends before ever starting it, a
 to it. `DeclareParam` throws an `ArgumentException` for a name that is not an identifier of at most
 32 characters, for `speed` or `airborne`, for a name declared again with the other type, and past the
 64th; declaring the same parameter twice does nothing. `ParamType` is `Bool` or `Float`, the two
-types an animation set knows. `DeclareParam` needs an SDK newer than 0.6.1; with 0.6.1, your README
-is the only declaration.
+types an animation set knows. `DeclareParam` is new in SDK 0.7.0: set `<AstraVersion>` to 0.7.0 or
+newer once that release is out (step 9 says how); against 0.6.1 your README is the only
+declaration.
 
 **The engine tells you what went wrong.** A parameter her animation set does not declare, a `play`
 cue naming a state it does not have, a cue for another set: the engine says so in a `warn` message,

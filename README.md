@@ -116,7 +116,7 @@ var astra = AstraSdk.Register("astra.mygame", "My Game");
 astra.Defaults.MatchPlayerHeight = 0.95f;           // as tall as 95% of the player
 astra.UsePlayer(cam => new PlayerInfo { Feet = …, Forward = …, Root = …, Height = … });
 astra.UseBrain(new MyBrain());                       // where she stands; call f.Default for ordinary frames
-astra.DeclareParam("swimming", ParamType.Bool);      // the facts it sends, shown to the player
+astra.DeclareParam("swimming", ParamType.Bool);      // the facts it sends (SDK 0.7.0+, using Astra.Bridge)
 astra.OnFrame(f => f.Params.Set("swimming", …));     // RAW FACTS for her animation set
 astra.Cues.Trigger("player_died");                   // animation by name, on a game event
 ```

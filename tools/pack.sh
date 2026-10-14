@@ -18,8 +18,11 @@
 #                       BepInEx 6 generated for an IL2CPP game. Default: the testbed's IL2CPP build's,
 #                       once BepInEx 6 has started it.
 # ASTRA_PACK_REQUIRE="urp17 urp14 hdrp il2cpp" (any of them, or "all") turns a missing part into an
-# error before anything is built, and builds the IL2CPP plugin as a release (it refuses an interop
-# that stripped something the foundation uses). The release scripts set it.
+# error before anything is built; il2cpp builds that plugin as a release (it refuses an interop that
+# stripped something the foundation uses). Only "all" packs the SDK and the template package as a
+# RELEASE (package version = the foundation's); any other run packs <version>-dev, and a run with no
+# IL2CPP plugin packs the SDK as <version>-mono-dev — never the id and version of a published package.
+# tools/make-runner-gi.sh is the run that makes a release's packages (CONTRIBUTING.md, "Releasing").
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -76,8 +79,14 @@ IL2CPP_RELEASE=false
 if [ -n "${ok[il2cpp]:-}" ]; then
   dotnet build src/Astra.BepInEx6.IL2CPP -c Release -v q -p:Il2CppInteropDir="$INTEROP" -p:AstraRelease=$IL2CPP_RELEASE
 fi
-dotnet pack src/Astra.Unity.Sdk -c Release -v q -p:AstraSdkIl2Cpp=$([ -n "${ok[il2cpp]:-}" ] && echo true || echo false)
-dotnet pack templates/Astra.Unity.Templates.csproj -c Release -v q
+# The packages are a release only when every part was REQUIRED (and so built).
+RELEASE=true
+for part in urp17 urp14 hdrp il2cpp; do [[ "$REQUIRE" == *" $part "* ]] || RELEASE=false; done
+SDK_FLAGS=(-p:AstraRelease=$RELEASE -p:AstraSdkIl2Cpp=$([ -n "${ok[il2cpp]:-}" ] && echo true || echo false))
+dotnet pack src/Astra.Unity.Sdk -c Release -v q "${SDK_FLAGS[@]}"
+dotnet pack templates/Astra.Unity.Templates.csproj -c Release -v q -p:AstraRelease=$RELEASE
+SDK_VERSION=$(dotnet msbuild src/Astra.Unity.Sdk -getProperty:PackageVersion "${SDK_FLAGS[@]}")
+TEMPLATES_VERSION=$(dotnet msbuild templates/Astra.Unity.Templates.csproj -getProperty:PackageVersion -p:AstraRelease=$RELEASE)
 
 # The foundation as it is installed in a game: BepInEx/plugins/Astra/…
 for flavour in mono il2cpp; do
@@ -99,6 +108,7 @@ done
 ls -R artifacts | head -40
 
 # Said LAST, where it is read: what this build left out, and how to get it.
+echo "wrote artifacts/nuget/Astra.Unity.Sdk.$SDK_VERSION.nupkg and Astra.Unity.Templates.$TEMPLATES_VERSION.nupkg$([ $RELEASE = true ] && echo ': a RELEASE' || echo ': prerelease packages, not a release')"
 missing=""
 for part in urp17 urp14 hdrp il2cpp; do
   if [ -n "${left[$part]:-}" ]; then missing="$missing $part"; fi
