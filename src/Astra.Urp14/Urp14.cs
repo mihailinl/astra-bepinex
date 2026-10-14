@@ -7,18 +7,18 @@ using UnityEngine.Rendering.Universal;
 namespace Astra.Unity
 {
     /// <summary>
-    /// URP 13–16 (Unity 2022.1–2023): she is drawn INSIDE the camera's render, right after its
-    /// transparent objects and BEFORE its post-processing — so the game's own look is laid over her
+    /// URP 13–16 (Unity 2022.1–2023): she is drawn INSIDE the camera's render, right before its
+    /// transparent objects and its post-processing — so the game's own look is laid over her
     /// as over everything else in its world: its colour grading, and the renderer features a stylised
     /// game builds its picture with (Extermination Ship's pixelation, dithering and posterisation —
     /// composited over the finished frame she stood out sharp and clean among them, the owner's
     /// first look, 2026-10-08).
     /// <para>
     /// The GPU tests her depth against the camera's depth BUFFER (the composite shader's pass 1
-    /// outputs it as SV_Depth, as in HDRP), not against the depth TEXTURE. That pass does not WRITE
-    /// her depth (its ZWrite is off), so neither the depth buffer nor any depth texture URP copies
-    /// from it holds her: a depth-based effect (an outline, a fog, a depth of field) does not see
-    /// her, and URP's TAA has no motion vectors for her.
+    /// outputs it as SV_Depth, as in HDRP), not against the depth TEXTURE; then pass 2 WRITES her
+    /// depth into that buffer where she is solid, before the transparent objects are drawn. A depth
+    /// texture URP makes by a prepass (SSAO, depth priming) does not hold her, so a depth-based
+    /// effect that reads one does not see her; URP's TAA has no motion vectors for her.
     /// </para>
     /// <para>
     /// Its own assembly, compiled against URP 14, so the plugin itself keeps compiling against Unity
@@ -59,18 +59,15 @@ namespace Astra.Unity
             public AstraPass(Compositor compositor)
             {
                 Compositor = compositor;
-                // After the world's transparent objects, still before its post-processing. Her pass
-                // TESTS her depth against the depth buffer but does not write it, so at
-                // AfterRenderingSkybox every transparent object BEHIND her (water, glass, haze, sky
-                // domes, decals) was blended over her. After the transparents nothing behind her can
-                // paint over her. Transparents IN FRONT of her (particles, glass) are drawn under her
-                // instead: the limitation every other path has, until a composite shader that writes
-                // her depth lets her go back to AfterRenderingSkybox.
-                // Enqueued at the camera's start, before the renderer's own passes and its features', so
-                // at this same event she is drawn first. URP's colour copy for refraction (the opaque
-                // texture, at AfterRenderingSkybox) is made before her, so refractive water or glass in
-                // front of her shows the world without her behind it, and she is drawn over it.
-                renderPassEvent = RenderPassEvent.AfterRenderingTransparents;
+                // After the world's opaque objects and its sky, BEFORE its transparent objects and its
+                // post-processing. Her colour is tested against the depth buffer (pass 1), then her
+                // depth is written into it (pass 2): a transparent object IN FRONT of her (particles,
+                // glass, water) is blended over her, one BEHIND her (haze, sky domes, decals) fails
+                // the depth test where she stands. With a pass that only tested her depth she had to
+                // wait until after the transparents, over every one of them, in front or not.
+                // Enqueued at the camera's start, before the renderer's own passes and its features',
+                // so at this same event she is drawn first.
+                renderPassEvent = RenderPassEvent.AfterRenderingSkybox;
             }
 
             /// <summary>No target configured: URP draws the pass into the camera's own colour and depth
@@ -98,6 +95,7 @@ namespace Astra.Unity
                     if (!Compositor.PrepareForPass(cam, intoTexture, block)) return;
                     var cmd = CommandBufferPool.Get("Astra");
                     cmd.DrawProcedural(Matrix4x4.identity, Compositor.Material, Compositor.DepthBufferPass, MeshTopology.Triangles, 3, 1, block);
+                    cmd.DrawProcedural(Matrix4x4.identity, Compositor.Material, Compositor.HerDepthPass, MeshTopology.Triangles, 3, 1, block);
                     context.ExecuteCommandBuffer(cmd);
                     CommandBufferPool.Release(cmd);
                 }
