@@ -3,14 +3,22 @@
 # BepInEx 6 (IL2CPP, with the .NET runtime it hosts plugins in) + this foundation's IL2CPP flavour.
 # Same contract as tools/make-runner-gi.sh; written to artifacts/astra-gi-il2cpp.zip.
 #
-# Usage: tools/make-runner-il2cpp-gi.sh   (builds the foundation with tools/pack.sh first)
+# Usage: tools/make-runner-il2cpp-gi.sh <IL2CPP interop dir>   (or IL2CPP_INTEROP_DIR=<dir>)
+#   The interop is a BepInEx/interop folder BepInEx 6 generated for an IL2CPP game that keeps every
+#   Unity type the foundation names (Schedule I's: ~/.local/share/astra/games/3164500/BepInEx/interop
+#   once Astra's launcher has started it); the testbed's IL2CPP build's is the default. tools/pack.sh
+#   builds the foundation first and refuses an interop the game stripped (CONTRIBUTING.md).
 #   BEPINEX6_ZIP=<file>  a downloaded BepInEx-Unity.IL2CPP-win-x64 build (default: fetched + verified)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BEPINEX6_URL="https://builds.bepinex.dev/projects/bepinex_be/788/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.788%2B5b766a3.zip"
 BEPINEX6_SHA256=f4cc496bd098a0df4164b81e3737297707f13a47c2478dba2f60eefab784817a
-bash tools/pack.sh >/dev/null
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
+# pack.sh's build output goes to a log; on a failure, its errors are shown.
+if ! ASTRA_PACK_REQUIRE=il2cpp bash tools/pack.sh "${1:-}" > "$OUT/pack.log"; then
+  grep -E ': error ' "$OUT/pack.log" | sed 's/ \[[^]]*\]$//' | sort -u >&2 || tail -20 "$OUT/pack.log" >&2
+  echo "${0##*/}: tools/pack.sh failed" >&2; exit 1
+fi
 if [ -z "${BEPINEX6_ZIP:-}" ]; then
   BEPINEX6_ZIP="$OUT/bepinex6.zip"
   curl -sL -o "$BEPINEX6_ZIP" "$BEPINEX6_URL"

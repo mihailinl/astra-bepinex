@@ -1,7 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- The plugin for IL2CPP Unity games, loaded by BepInEx 6. Unity's API comes from the interop
        assemblies BepInEx generates for a game on its first run (BepInEx/interop): point
-       Il2CppInteropDir at ANY IL2CPP game's folder (they bind by name at run time, like Mono's). -->
+       Il2CppInteropDir at that folder of an IL2CPP game (they bind by name at run time, like Mono's,
+       so the plugin built against one game runs in others). The folder must hold every Unity type the
+       foundation names, and a game built with code stripping can lack some: Schedule I's (Unity
+       2022.3) has them all. Two are handled below: a folder without SphericalHarmonicsL2 or
+       RenderPipelineManager's camera events (MiSide's lacks both) builds a plugin that goes without
+       them, with a warning — fine for trying it in that game, never for a release (AstraRelease=true,
+       which tools/pack.sh sets for one, makes it an error). Anything else missing fails the build:
+       see CONTRIBUTING.md, "IL2CPP games". -->
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
     <AssemblyName>Astra.Unity</AssemblyName>
@@ -19,6 +26,19 @@
     <BepInExPluginName>Astra</BepInExPluginName>
     <Il2CppInteropDir Condition="'$(Il2CppInteropDir)' == ''">$(MSBuildThisFileDirectory)../../unity/AstraTestbed/Build/il2cpp/BepInEx/interop</Il2CppInteropDir>
     <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+    <AstraInteropCore>$(Il2CppInteropDir)/UnityEngine.CoreModule.dll</AstraInteropCore>
+  </PropertyGroup>
+  <!-- What a game built with code stripping may have removed, and the foundation can build without:
+       a type's or member's name is in its assembly's metadata as plain ASCII, and nowhere in an
+       interop that lost it. Each one compiles its users (Sh.cs; Compat.Render.cs's routes) as stubs
+       that fail the way a member stripped at RUN time fails, so the plugin goes on without it. -->
+  <PropertyGroup Condition="Exists('$(AstraInteropCore)') And '$([System.IO.File]::ReadAllText($(AstraInteropCore)).Contains(`SphericalHarmonicsL2`))' == 'False'">
+    <AstraStripped>$(AstraStripped) SphericalHarmonicsL2 (it reads no light probes);</AstraStripped>
+    <DefineConstants>$(DefineConstants);ASTRA_NO_PROBES</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(AstraInteropCore)') And ('$([System.IO.File]::ReadAllText($(AstraInteropCore)).Contains(`beginCameraRendering`))' == 'False' Or '$([System.IO.File]::ReadAllText($(AstraInteropCore)).Contains(`endCameraRendering`))' == 'False' Or '$([System.IO.File]::ReadAllText($(AstraInteropCore)).Contains(`endContextRendering`))' == 'False')">
+    <AstraStripped>$(AstraStripped) RenderPipelineManager's camera events (it never draws her in a URP or HDRP game);</AstraStripped>
+    <DefineConstants>$(DefineConstants);ASTRA_NO_SRP_EVENTS</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.788" PrivateAssets="all" />
@@ -30,5 +50,13 @@
     <Reference Include="$(Il2CppInteropDir)/Il2CppSystem*.dll" Private="false" />
     <Reference Include="$(Il2CppInteropDir)/Unity.RenderPipelines.Core.Runtime.dll" Private="false" />
   </ItemGroup>
+  <Target Name="AstraCheckRefs" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(AstraInteropCore)')"
+      Text="The IL2CPP plugin compiles against the interop assemblies BepInEx 6 generates from an IL2CPP game on its first start, and '$(Il2CppInteropDir)' has no UnityEngine.CoreModule.dll. Set Il2CppInteropDir (tools/pack.sh: its first argument, or IL2CPP_INTEROP_DIR) to such a game's BepInEx/interop — with Astra's launcher, ~/.local/share/astra/games/&lt;steam appid&gt;/BepInEx/interop — or build the testbed's IL2CPP player and start it once." />
+    <Warning Condition="'$(AstraStripped)' != '' And '$(AstraRelease)' != 'true'"
+      Text="'$(Il2CppInteropDir)' lacks what its game stripped, so this build goes without it in EVERY game:$(AstraStripped) fine for trying it in that game, never ship it. Release builds use an interop that keeps everything (Schedule I's does)." />
+    <Error Condition="'$(AstraStripped)' != '' And '$(AstraRelease)' == 'true'"
+      Text="A release of the IL2CPP plugin must be built against an interop that keeps everything the foundation names (Schedule I's does), and '$(Il2CppInteropDir)' lacks:$(AstraStripped)" />
+  </Target>
   <Import Project="../Astra.Unity/Astra.Unity.props" />
 </Project>

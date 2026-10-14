@@ -9,6 +9,24 @@ using Il2CppInterop.Runtime.InteropTypes.Arrays;
 
 namespace Astra.Unity
 {
+#if ASTRA_NO_PROBES
+    /// <summary>
+    /// <see cref="Sh"/> in an IL2CPP build compiled against an interop that has no
+    /// <c>SphericalHarmonicsL2</c> at all (a game that stripped it, e.g. MiSide; the csproj detects it
+    /// and warns): every read fails the way a stripped type fails at run time, so the callers' own
+    /// fallbacks (<see cref="Compat.Stripped"/>) light her from what the game still has.
+    /// </summary>
+    static class Sh
+    {
+        static TypeLoadException Absent() => new TypeLoadException(
+            "this foundation was compiled against an interop without SphericalHarmonicsL2: it reads no light probes");
+
+        public static Color[] Local(Vector3 at, Vector3[] directions) => throw Absent();
+        public static Color[] Global(Vector3[] directions) => throw Absent();
+        public static Color[] Hdrp(Camera cam, Vector3[] directions) => throw Absent();
+        public static void BindHdrp() => throw Absent();
+    }
+#else
     /// <summary>
     /// Every use of <c>SphericalHarmonicsL2</c> — light probes, the scene's ambient probe, HDRP's sky
     /// probe — and nothing else. A game built with code stripping that never touches light probes has
@@ -77,4 +95,5 @@ namespace Astra.Unity
             public static Func<Camera, SphericalHarmonicsL2> Read;
         }
     }
+#endif
 }

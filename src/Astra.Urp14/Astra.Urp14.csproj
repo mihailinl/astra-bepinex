@@ -15,4 +15,8 @@
     <Reference Include="$(UrpRefDir)/Unity.RenderPipelines.Core.Runtime.dll" Private="false" />
     <ProjectReference Include="../Astra.BepInEx5/Astra.BepInEx5.csproj" Private="false" />
   </ItemGroup>
+  <Target Name="AstraCheckRefs" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="'$(UrpRefDir)' == '' Or !Exists('$(UrpRefDir)/Unity.RenderPipelines.Universal.Runtime.dll')"
+      Text="Astra.Urp14 compiles against a URP 14 game's own assemblies, which have no NuGet package: set UrpRefDir (tools/pack.sh: URP14_REF_DIR) to a Unity 2022.3 URP game's &lt;Game&gt;_Data/Managed ('$(UrpRefDir)' has no Unity.RenderPipelines.Universal.Runtime.dll)." />
+  </Target>
 </Project>

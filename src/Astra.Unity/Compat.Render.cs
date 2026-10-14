@@ -149,6 +149,22 @@ namespace Astra.Unity
         // method compiles — inside Subscribe's try — never when its caller does. Each route holds its
         // own way off too, so a route whose remove is missing is never taken: nothing could undo it.
 
+#if ASTRA_NO_SRP_EVENTS
+        // An IL2CPP build compiled against an interop with no RenderPipelineManager camera events at
+        // all (a game that stripped them, e.g. MiSide; the csproj detects it and warns): every route
+        // fails the way a stripped member fails at run time, so HookSrp says no and the caller goes on
+        // without them.
+
+        static MissingMemberException NoSrpEvents() => new MissingMemberException(
+            "this foundation was compiled against an interop without RenderPipelineManager's camera events");
+
+        static void BeginByAccessor(CameraHandler d, bool on) => throw NoSrpEvents();
+        static void EndByAccessor(CameraHandler d, bool on) => throw NoSrpEvents();
+        static void ContextEndByAccessor(ContextHandler d, bool on) => throw NoSrpEvents();
+        static void BeginByField(CameraHandler d, bool on) => throw NoSrpEvents();
+        static void EndByField(CameraHandler d, bool on) => throw NoSrpEvents();
+        static void ContextEndByField(ContextHandler d, bool on) => throw NoSrpEvents();
+#else
         [MethodImpl(MethodImplOptions.NoInlining)]
         static void BeginByAccessor(CameraHandler d, bool on)
         {
@@ -208,6 +224,7 @@ namespace Astra.Unity
                 ? Il2CppSystem.Delegate.Combine(RenderPipelineManager.endContextRendering, d).Cast<ContextHandler>()
                 : Il2CppSystem.Delegate.Remove(RenderPipelineManager.endContextRendering, d)?.TryCast<ContextHandler>();
 #endif
+#endif // ASTRA_NO_SRP_EVENTS
 
         /// <summary>The Built-in pipeline's per-camera callback before culling.</summary>
         public static void HookBuiltIn(Action<Camera> preCull)

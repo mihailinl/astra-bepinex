@@ -129,8 +129,9 @@ tools/pack.sh [<an IL2CPP game>/BepInEx/interop]   # everything → artifacts/
 ```
 
 `tools/pack.sh` compiles the pipeline adapters and the IL2CPP flavour against assemblies that have
-no NuGet package; [`CONTRIBUTING.md`](CONTRIBUTING.md#building-and-testing) says which folders to
-point it at. The composite shader is a Unity asset bundle per Unity line, embedded in the plugins:
+no NuGet package; [`CONTRIBUTING.md`](CONTRIBUTING.md#everything-toolspacksh) says which folders to
+point it at. On a fresh clone it builds what it can and ends by naming what it left out and the
+variable that brings each part back. The composite shader is a Unity asset bundle per Unity line, embedded in the plugins:
 2021, 2022 and 6000 today. A bundle loads in its own line and newer ones, never older, so bundles
 for 2019–2020 are welcome ([how](CONTRIBUTING.md#a-shader-bundle-for-another-unity-line)). An IL2CPP
 game's build strips the engine API the game never uses; check the IL2CPP flavour against a game with

@@ -4,7 +4,8 @@
        IL2CPP game (BepInEx 6). An integration references it compile-only
        (ExcludeAssets="runtime"): the foundation is installed in the game as its own item, so an
        update of it reaches every integration without a rebuild. Build the two plugins first
-       (tools/pack.sh does it in order). -->
+       (tools/pack.sh does it in order). AstraSdkIl2Cpp=false packs the Mono half alone (pack.sh does,
+       when it had no IL2CPP interop to build that plugin): never a release. -->
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <IncludeBuildOutput>false</IncludeBuildOutput>
@@ -19,10 +20,19 @@
     <PackageOutputPath>$(MSBuildThisFileDirectory)../../artifacts/nuget</PackageOutputPath>
     <MonoOut>$(MSBuildThisFileDirectory)../Astra.BepInEx5/bin/$(Configuration)/netstandard2.0/</MonoOut>
     <Il2CppOut>$(MSBuildThisFileDirectory)../Astra.BepInEx6.IL2CPP/bin/$(Configuration)/net6.0/</Il2CppOut>
+    <AstraSdkIl2Cpp Condition="'$(AstraSdkIl2Cpp)' == ''">true</AstraSdkIl2Cpp>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="/" />
     <None Include="$(MonoOut)Astra.Unity.dll;$(MonoOut)Astra.Unity.xml;$(MonoOut)Astra.Bridge.Core.dll;$(MonoOut)Astra.Bridge.Core.xml" Pack="true" PackagePath="lib/netstandard2.0" />
-    <None Include="$(Il2CppOut)Astra.Unity.dll;$(Il2CppOut)Astra.Unity.xml;$(Il2CppOut)Astra.Bridge.Core.dll;$(Il2CppOut)Astra.Bridge.Core.xml" Pack="true" PackagePath="lib/net6.0" />
+    <None Condition="'$(AstraSdkIl2Cpp)' == 'true'" Include="$(Il2CppOut)Astra.Unity.dll;$(Il2CppOut)Astra.Unity.xml;$(Il2CppOut)Astra.Bridge.Core.dll;$(Il2CppOut)Astra.Bridge.Core.xml" Pack="true" PackagePath="lib/net6.0" />
   </ItemGroup>
+  <Target Name="AstraCheckPlugins" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('$(MonoOut)Astra.Unity.dll')"
+      Text="The SDK packs the built plugins, and the Mono one is not built: dotnet build src/Astra.BepInEx5 -c $(Configuration) first (tools/pack.sh does it in order)." />
+    <Error Condition="'$(AstraSdkIl2Cpp)' == 'true' And !Exists('$(Il2CppOut)Astra.Unity.dll')"
+      Text="The SDK packs the built plugins, and the IL2CPP one is not built: build src/Astra.BepInEx6.IL2CPP with an interop (tools/pack.sh does), or pack the Mono half alone with -p:AstraSdkIl2Cpp=false (never a release)." />
+    <Warning Condition="'$(AstraSdkIl2Cpp)' != 'true'"
+      Text="This SDK package has no net6.0 (IL2CPP) API: an IL2CPP integration cannot build against it. Never release it." />
+  </Target>
 </Project>

@@ -96,14 +96,22 @@ artifacts/nuget/                                     Astra.Unity.Sdk.<version>.n
 ```
 
 The adapters and the IL2CPP plugin compile against assemblies that have no NuGet package. You point
-the build at folders that have them. These folders are only read; never commit them.
+the build at folders that have them. These folders are only read; never commit them. **A part
+without its folder is left out**, and `pack.sh` ends by listing what it left out, what that costs
+and the variable that brings it back. So a fresh clone runs `tools/pack.sh` as it is and gets the Mono
+foundation without adapters, a Mono-only SDK package and the template package: enough to work on
+the foundation, never a release.
 
 | for | set | point it at | without it |
 |---|---|---|---|
-| the URP 17 adapter | environment `UrpRefDir` | a Unity 6 URP game's `<Game>_Data/Managed`, or a Unity 6 URP project's `Library/ScriptAssemblies`. The default is the testbed's `unity/AstraTestbed/Library/ScriptAssemblies`, which exists once you open or build the testbed. | **the build fails** (a fresh clone has no testbed `Library/`) |
-| the URP 14 adapter | `URP14_REF_DIR` | a Unity 2022.3 URP game's `<Game>_Data/Managed` | a warning; the foundation draws such games over the finished frame |
-| the HDRP adapter | `HDRP_REF_DIR` | an HDRP game's `<Game>_Data/Managed`, or an HDRP project's `Library/ScriptAssemblies` | a warning; HDRP games get no depth test |
-| the IL2CPP plugin | the first argument of `pack.sh` (or environment `Il2CppInteropDir`) | a `BepInEx/interop` folder that BepInEx 6 generated for an IL2CPP game. It must keep every Unity type the foundation names: Schedule I's works; MiSide's lacks `SphericalHarmonicsL2` and does not compile. The default is the testbed's `unity/AstraTestbed/Build/il2cpp/BepInEx/interop`, which exists once BepInEx 6 has started the testbed's IL2CPP build. | the build fails |
+| the URP 17 adapter | `URP17_REF_DIR` | a Unity 6 URP game's `<Game>_Data/Managed`, or a Unity 6 URP project's `Library/ScriptAssemblies`. The default is the testbed's `unity/AstraTestbed/Library/ScriptAssemblies`, which exists once you open or build the testbed. | Unity 6 URP games get her after the camera instead of inside its render |
+| the URP 14 adapter | `URP14_REF_DIR` | a Unity 2022.3 URP game's `<Game>_Data/Managed` | URP 2022-2023 games get her over the finished frame |
+| the HDRP adapter | `HDRP_REF_DIR` | an HDRP game's `<Game>_Data/Managed`, or an HDRP project's `Library/ScriptAssemblies` | HDRP games get her without a depth test |
+| the IL2CPP plugin | the first argument of `pack.sh`, or `IL2CPP_INTEROP_DIR` | a `BepInEx/interop` folder that BepInEx 6 generated for an IL2CPP game (with Astra's launcher: `~/.local/share/astra/games/<steam appid>/BepInEx/interop`). The default is the testbed's `unity/AstraTestbed/Build/il2cpp/BepInEx/interop`, which exists once BepInEx 6 has started the testbed's IL2CPP build. See [the interop it needs](#which-interop-the-il2cpp-plugin-needs). | no IL2CPP foundation, and the SDK package has no `net6.0` (IL2CPP) half |
+
+`ASTRA_PACK_REQUIRE` names the parts a build must have (`urp17`, `urp14`, `hdrp`, `il2cpp`, or
+`all`): a missing one is then an error before anything is built, and `il2cpp` builds that plugin as
+a release (below). The older spellings `UrpRefDir` and `Il2CppInteropDir` still work.
 
 For example, with the games the maintainers use (Content Warning is Unity 6 URP, the EXTERMINATION
 SHIP demo is Unity 2022.3 URP, Lethal Company is HDRP, and the interop is Schedule I's from Astra's
@@ -111,20 +119,50 @@ launcher profile):
 
 ```bash
 S=~/.steam/steam/steamapps/common   # wherever your Steam library is
-UrpRefDir="$S/Content Warning/Content Warning_Data/Managed" \
+URP17_REF_DIR="$S/Content Warning/Content Warning_Data/Managed" \
 URP14_REF_DIR="$S/EXTERMINATION SHIP Demo/Extermination ship_Data/Managed" \
 HDRP_REF_DIR="$S/Lethal Company/Lethal Company_Data/Managed" \
+ASTRA_PACK_REQUIRE=all \
   tools/pack.sh ~/.local/share/astra/games/3164500/BepInEx/interop
 ```
 
-Any game of the right kind works. You do not have to own these.
+Any game of the right kind works; you do not need these ones.
+
+Building one project by hand works the same way: `dotnet build src/Astra.Urp17 -p:UrpRefDir=…`,
+`src/Astra.Urp14 -p:UrpRefDir=…`, `src/Astra.Hdrp -p:HdrpRefDir=…`,
+`src/Astra.BepInEx6.IL2CPP -p:Il2CppInteropDir=…`. Without its folder, each one stops with an error
+that says what to set.
+
+#### Which interop the IL2CPP plugin needs
+
+Interop assemblies bind by name at run time, so a plugin built against one game's interop runs in
+other IL2CPP games. But a game built with code stripping can lack Unity types or members the
+foundation names, and then they are missing from its interop too. The build looks for two of them
+and goes on without them, with a warning:
+
+- `SphericalHarmonicsL2` (light probes): without it the plugin reads no light probes;
+- `RenderPipelineManager`'s camera events: without them it never draws her in a URP or HDRP game.
+
+MiSide's interop (Unity 2021.3, Built-in) lacks both. A plugin built against it works in MiSide,
+and goes without both in every other game, so it is for trying something in that game only. A
+release build (`-p:AstraRelease=true`, which `ASTRA_PACK_REQUIRE=il2cpp` sets) refuses such an
+interop. Schedule I's (Unity 2022.3, URP) keeps everything: the releases are built against it. Any
+other missing type fails the build with a compiler error that names it; isolate it the same way
+(`ASTRA_NO_PROBES` in `Sh.cs`, `ASTRA_NO_SRP_EVENTS` in `Compat.Render.cs`, and the checks in
+`Astra.BepInEx6.IL2CPP.csproj`), or build against another game's interop.
 
 `tools/make-runner-gi.sh` and `tools/make-runner-il2cpp-gi.sh` lay out the release zips of "Astra
 for any Unity game" (`artifacts/astra-gi.zip`, `artifacts/astra-gi-il2cpp.zip`). They download
-BepInEx and check its digest. They call `tools/pack.sh` with no argument, so set `Il2CppInteropDir`
-in the environment if you have no testbed build. The Mono runner refuses to build without
-`HDRP_REF_DIR` and `URP14_REF_DIR`: a release must carry every adapter. Releases are the
-maintainers' job; you rarely need these.
+BepInEx and check its digest. They run `tools/pack.sh` with `ASTRA_PACK_REQUIRE`: the Mono runner
+needs all three adapters (`URP17_REF_DIR`, `URP14_REF_DIR`, `HDRP_REF_DIR`), and the IL2CPP runner an
+interop that keeps everything (its first argument, or `IL2CPP_INTEROP_DIR`):
+
+```bash
+URP17_REF_DIR=… URP14_REF_DIR=… HDRP_REF_DIR=… tools/make-runner-gi.sh
+tools/make-runner-il2cpp-gi.sh ~/.local/share/astra/games/3164500/BepInEx/interop
+```
+
+Releases are the maintainers' job; you rarely need these.
 
 ### The testbed
 
@@ -247,7 +285,9 @@ a method that is allowed to fail:
 
 `src/Astra.Unity/Sh.cs` is the pattern: light probes, which MiSide's build removed. When you call a
 Unity API the foundation did not use before, run the audit against at least one IL2CPP game and
-fence what it reports. `check-game-members` has two more modes, `dump` and `check`, for integration
+fence what it reports. That fence is for RUN time. To COMPILE, the plugin needs an interop that has
+the type ([which interop](#which-interop-the-il2cpp-plugin-needs)), and the audit reads the plugin
+built against it. `check-game-members` has two more modes, `dump` and `check`, for integration
 authors ([`docs/WRITE-AN-INTEGRATION.md`](docs/WRITE-AN-INTEGRATION.md#4-find-your-way-around-the-game)).
 
 ## Reporting a game that does not work

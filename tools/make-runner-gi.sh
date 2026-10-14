@@ -3,16 +3,21 @@
 # per-game integration (docs/GAME-INTEGRATION-MANIFEST.md §3, the engine-target form). Built LOCALLY:
 # the foundation's HDRP adapter compiles against HDRP's own assemblies, which never go into CI.
 #
-# Usage: HDRP_REF_DIR=<an HDRP game's *_Data/Managed> URP14_REF_DIR=<a Unity 2022.3 URP game's *_Data/Managed> tools/make-runner-gi.sh
+# Usage: URP17_REF_DIR=<a Unity 6 URP game's *_Data/Managed> URP14_REF_DIR=<a Unity 2022.3 URP game's *_Data/Managed> \
+#        HDRP_REF_DIR=<an HDRP game's *_Data/Managed> tools/make-runner-gi.sh
+#   The runner must carry every pipeline adapter: tools/pack.sh refuses to start without any of the
+#   three (URP17_REF_DIR may be left out where the testbed has been opened or built).
 #   BEPINEX_DIST=<dir>  an unpacked BepInEx_win_x64_5.4.23.5.zip (default: fetched and verified here)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BEPINEX_URL=https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.5/BepInEx_win_x64_5.4.23.5.zip
 BEPINEX_SHA256=82f9878551030f54657792c0740d9d51a09500eeae1fba21106b0c441e6732c4
-[ -n "${HDRP_REF_DIR:-}" ] || { echo "make-runner-gi.sh: set HDRP_REF_DIR (the runner must carry its HDRP adapter)" >&2; exit 1; }
-[ -n "${URP14_REF_DIR:-}" ] || { echo "make-runner-gi.sh: set URP14_REF_DIR (the runner must carry its URP 2022 adapter)" >&2; exit 1; }
-bash tools/pack.sh >/dev/null
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
+# pack.sh's build output goes to a log; on a failure, its errors are shown.
+if ! ASTRA_PACK_REQUIRE="urp17 urp14 hdrp" bash tools/pack.sh > "$OUT/pack.log"; then
+  grep -E ': error ' "$OUT/pack.log" | sed 's/ \[[^]]*\]$//' | sort -u >&2 || tail -20 "$OUT/pack.log" >&2
+  echo "${0##*/}: tools/pack.sh failed" >&2; exit 1
+fi
 if [ -z "${BEPINEX_DIST:-}" ]; then
   BEPINEX_DIST="$OUT/bepinex-dist"; mkdir -p "$BEPINEX_DIST"
   curl -sL -o "$OUT/bie.zip" "$BEPINEX_URL"

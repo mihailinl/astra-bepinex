@@ -16,4 +16,8 @@
     <Reference Include="$(HdrpRefDir)/Unity.RenderPipelines.Core.Runtime.dll" Private="false" />
     <ProjectReference Include="../Astra.BepInEx5/Astra.BepInEx5.csproj" Private="false" />
   </ItemGroup>
+  <Target Name="AstraCheckRefs" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(HdrpRefDir)/Unity.RenderPipelines.HighDefinition.Runtime.dll')"
+      Text="Astra.Hdrp compiles against HDRP's own assemblies, which have no NuGet package, and '$(HdrpRefDir)' has no Unity.RenderPipelines.HighDefinition.Runtime.dll. Set HdrpRefDir (tools/pack.sh: HDRP_REF_DIR) to an HDRP game's &lt;Game&gt;_Data/Managed, or an HDRP project's Library/ScriptAssemblies." />
+  </Target>
 </Project>

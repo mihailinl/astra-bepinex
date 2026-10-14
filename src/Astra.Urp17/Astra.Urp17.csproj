@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Her composite pass for URP 17 (Unity 6), inside the camera's render graph. Compiled against
-       Unity 6 and URP 17, which ship with no NuGet package: UrpRefDir points at a Unity 6 project's
-       Library/ScriptAssemblies (the testbed's, once it has been opened or built). -->
+       Unity 6 and URP 17, which ship with no NuGet package: UrpRefDir points at a Unity 6 URP game's
+       <Game>_Data/Managed or a Unity 6 URP project's Library/ScriptAssemblies (default: the testbed's,
+       which exists once it has been opened or built — never on a fresh clone). tools/pack.sh takes it
+       as URP17_REF_DIR and leaves this adapter out, with a warning, when there is none. -->
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>Astra.Urp17</AssemblyName>
@@ -15,4 +17,8 @@
     <Reference Include="$(UrpRefDir)/Unity.RenderPipelines.Core.Runtime.dll" Private="false" />
     <ProjectReference Include="../Astra.BepInEx5/Astra.BepInEx5.csproj" Private="false" />
   </ItemGroup>
+  <Target Name="AstraCheckRefs" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(UrpRefDir)/Unity.RenderPipelines.Universal.Runtime.dll')"
+      Text="Astra.Urp17 compiles against URP 17's own assemblies, which have no NuGet package, and '$(UrpRefDir)' has no Unity.RenderPipelines.Universal.Runtime.dll. Set UrpRefDir (tools/pack.sh: URP17_REF_DIR) to a Unity 6 URP game's &lt;Game&gt;_Data/Managed, or a Unity 6 URP project's Library/ScriptAssemblies (the testbed's exists once it has been opened or built)." />
+  </Target>
 </Project>
