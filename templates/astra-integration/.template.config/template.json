@@ -46,15 +46,18 @@
         "xml"
       ]
     },
-    "idChars": {
+    "slashes": {
       "identifier": "replace",
-      "pattern": "[^A-Za-z0-9._-]",
-      "replacement": ""
+      "pattern": "\\\\",
+      "replacement": "/"
     },
-    "githubName": {
-      "identifier": "replace",
-      "pattern": "[^A-Za-z0-9-]",
-      "replacement": ""
+    "exeSafe": {
+      "identifier": "chain",
+      "steps": [
+        "slashes",
+        "noQuote",
+        "noControl"
+      ]
     }
   },
   "tags": {
@@ -73,7 +76,8 @@
       "type": "parameter",
       "datatype": "text",
       "defaultValue": "astra.my-game",
-      "description": "The integration's id: its BepInEx GUID and its marketplace id (\"astra.peak\"). Letters, digits, '.', '_' and '-' only: anything else is dropped."
+      "description": "The integration's id: its BepInEx GUID and its marketplace id (\"astra.peak\"). It must match ^[A-Za-z0-9][A-Za-z0-9._-]*$: anything else is refused and nothing is written.",
+      "replaces": "astra.integration-id"
     },
     "runtime": {
       "type": "parameter",
@@ -107,13 +111,14 @@
       "type": "parameter",
       "datatype": "text",
       "defaultValue": "your-github-name",
-      "description": "The GitHub user or organisation that will own this repository: its address in astra-gi.toml, the author and the LICENSE's copyright (letters, digits and '-', as GitHub allows)."
+      "description": "The GitHub user or organisation that will own this repository: its address in astra-gi.toml, the author and the LICENSE's copyright. It must match ^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$ (a GitHub name): anything else is refused and nothing is written.",
+      "replaces": "GITHUB_OWNER"
     },
     "exe": {
       "type": "parameter",
       "datatype": "text",
       "defaultValue": "",
-      "description": "The game's executable, relative to its folder (default: <game>.exe)."
+      "description": "The game's executable, relative to its folder (default: <game>.exe). A \\ becomes /, a \" becomes '."
     },
     "mono": {
       "type": "computed",
@@ -157,6 +162,24 @@
         ]
       }
     },
+    "idValid": {
+      "type": "generated",
+      "generator": "regexMatch",
+      "datatype": "bool",
+      "parameters": {
+        "source": "id",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+      }
+    },
+    "ownerValid": {
+      "type": "generated",
+      "generator": "regexMatch",
+      "datatype": "bool",
+      "parameters": {
+        "source": "owner",
+        "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"
+      }
+    },
     "gameStr": {
       "type": "derived",
       "valueSource": "game",
@@ -169,53 +192,11 @@
       "valueTransform": "codeSafeXml",
       "replaces": "XML_GAME"
     },
-    "idSafe": {
-      "type": "derived",
-      "valueSource": "id",
-      "valueTransform": "idChars"
-    },
-    "idFallback": {
-      "type": "generated",
-      "generator": "constant",
-      "parameters": {
-        "value": "astra.my-game"
-      }
-    },
-    "idName": {
-      "type": "generated",
-      "generator": "coalesce",
-      "replaces": "astra.integration-id",
-      "parameters": {
-        "sourceVariableName": "idSafe",
-        "fallbackVariableName": "idFallback"
-      }
-    },
     "gameDirXml": {
       "type": "derived",
       "valueSource": "gameDir",
       "valueTransform": "xml",
       "replaces": "GAME_DIR_PATH"
-    },
-    "ownerSafe": {
-      "type": "derived",
-      "valueSource": "owner",
-      "valueTransform": "githubName"
-    },
-    "ownerFallback": {
-      "type": "generated",
-      "generator": "constant",
-      "parameters": {
-        "value": "your-github-name"
-      }
-    },
-    "ownerName": {
-      "type": "generated",
-      "generator": "coalesce",
-      "replaces": "GITHUB_OWNER",
-      "parameters": {
-        "sourceVariableName": "ownerSafe",
-        "fallbackVariableName": "ownerFallback"
-      }
     },
     "exeDefault": {
       "type": "generated",
@@ -244,7 +225,7 @@
     "exeStr": {
       "type": "derived",
       "valueSource": "exeName",
-      "valueTransform": "codeSafe",
+      "valueTransform": "exeSafe",
       "replaces": "GAME_EXE"
     },
     "copyrightYear": {
@@ -338,6 +319,36 @@
           "exclude": [
             ".github/**"
           ]
+        },
+        {
+          "condition": "(!idValid || !ownerValid)",
+          "exclude": [
+            "**/*"
+          ]
+        }
+      ]
+    }
+  ],
+  "postActions": [
+    {
+      "condition": "(!idValid)",
+      "description": "REFUSED: nothing was written.",
+      "actionId": "AC1156F7-BB77-4DB8-B28F-24EEBCCA1E5C",
+      "continueOnError": false,
+      "manualInstructions": [
+        {
+          "text": "--id is not an integration id: it must match ^[A-Za-z0-9][A-Za-z0-9._-]*$ (letters, digits, '.', '_', '-'; e.g. astra.peak). Run dotnet new again with a valid one."
+        }
+      ]
+    },
+    {
+      "condition": "(!ownerValid)",
+      "description": "REFUSED: nothing was written.",
+      "actionId": "AC1156F7-BB77-4DB8-B28F-24EEBCCA1E5C",
+      "continueOnError": false,
+      "manualInstructions": [
+        {
+          "text": "--owner is not a GitHub user or organisation name: it must match ^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$. Run dotnet new again with a valid one."
         }
       ]
     }

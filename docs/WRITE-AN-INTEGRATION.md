@@ -69,15 +69,18 @@ dotnet new astra-integration -n AstraMyGame --game "My Game" --id astra.mygame -
 cd AstraMyGame && git init      # your new repository
 ```
 
+`dotnet new` cannot fail on an option's value, so an `--id` or `--owner` that is not one writes
+nothing and prints `REFUSED: nothing was written.` with the rule it breaks; run it again.
+
 | option | meaning |
 |---|---|
 | `-n` | the project, assembly and folder name |
 | `--game` | the game's name as players know it (required; in code and manifests a `"` becomes `'` and a `\` is dropped) |
 | `--steamAppId` | the game's Steam app id; its store page address has it (required) |
-| `--id` | your integration's id: its BepInEx GUID, and the id in `astra-gi.toml` (`astra.<game>`; letters, digits, `.`, `_`, `-`) |
+| `--id` | your integration's id: its BepInEx GUID, and the id in `astra-gi.toml` (`astra.<game>`; letters, digits, `.`, `_`, `-`, else nothing is written) |
 | `--runtime` | `mono` (BepInEx 5) or `il2cpp` (BepInEx 6, [step 11](#11-il2cpp-integrations)) |
-| `--owner` | the GitHub user or organisation that will own the repository: its address in `astra-gi.toml`, the author, the `LICENSE`'s copyright (letters, digits, `-`) |
-| `--exe` | the game's executable, relative to its folder (default: `<game>.exe`) |
+| `--owner` | the GitHub user or organisation that will own the repository: its address in `astra-gi.toml`, the author, the `LICENSE`'s copyright (a GitHub name: letters, digits, `-`, else nothing is written) |
+| `--exe` | the game's executable, relative to its folder (default: `<game>.exe`; a `\` becomes `/`) |
 | `--gameDir` | the game's folder; leave it out (see below) |
 
 You get a repository that can already make a release:
