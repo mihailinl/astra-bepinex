@@ -61,16 +61,32 @@ namespace Astra.Bridge
     /// keeps the list a hello carried and replaces it with the next hello's, so every declaration
     /// belongs before the first hello: <see cref="Said"/> tells a late one apart.
     /// </summary>
+    /// <summary>What <see cref="ParamDeclarations.Declare"/> did.</summary>
+    public enum DeclareOutcome
+    {
+        /// <summary>It was declared already, with that type: nothing changed.</summary>
+        AlreadyDeclared,
+        /// <summary>Added before any hello took the list: the next hello says it.</summary>
+        Added,
+        /// <summary>Added AFTER a hello took the list (<see cref="ParamDeclarations.Said"/>): Astra hears
+        /// of it only with the next connection's hello, and keeps the shorter list until then.</summary>
+        AddedAfterHello,
+    }
+
     public sealed class ParamDeclarations
     {
         /// <summary>The most parameters one hello declares, the measured ones included (the engine's
         /// own bound): an integration beside the foundation's two declares at most 62.</summary>
         public const int MaxCount = 64;
 
+        // Declare (the game's thread) and ForHello (the link's) each read what the other writes —
+        // the list and "said" — so both run under one lock: either the declaration is in that
+        // hello's list, or it is reported as AddedAfterHello. Never neither (volatile fields alone
+        // would allow it: they do not order a store before a later load).
+        readonly object gate = new object();
         readonly List<ParamDecl> list = new List<ParamDecl>();
         readonly int measured;
-        volatile ParamDecl[] snapshot;
-        volatile bool said;
+        bool said;
 
         /// <param name="measured">The parameters the foundation itself sends (<see cref="ParamDecl.Speed"/>,
         /// <see cref="ParamDecl.Airborne"/>): declared first, and names nobody else may declare.</param>
@@ -78,53 +94,67 @@ namespace Astra.Bridge
         {
             foreach (var p in measured ?? new ParamDecl[0]) list.Add(p);
             this.measured = list.Count;
-            snapshot = list.ToArray();
         }
 
-        public int Count => list.Count;
+        public int Count
+        {
+            get { lock (gate) return list.Count; }
+        }
 
         /// <summary>Has a hello carried these declarations (<see cref="ForHello"/>)? Then one declared
         /// now reaches Astra only with the next connection's hello.</summary>
-        public bool Said => said;
+        public bool Said
+        {
+            get { lock (gate) return said; }
+        }
 
         /// <summary>
         /// Declare a parameter this game sends. Declaring the same name with the same type again does
-        /// nothing. True when it was added (false: it was there).
+        /// nothing. The outcome says whether it was added, and whether a hello had already taken the
+        /// list — decided in the same step as the adding, so it is never wrong about a racing hello.
         /// </summary>
         /// <exception cref="ArgumentException">The name is not an identifier of at most
         /// <see cref="ParamDecl.MaxName"/> characters, is one the foundation measures itself, was
         /// declared with the other type, or would be past <see cref="MaxCount"/> in all.</exception>
-        public bool Declare(string name, ParamType type)
+        public DeclareOutcome Declare(string name, ParamType type)
         {
             if (!ParamDecl.ValidName(name))
                 throw new ArgumentException($"'{name}' is not a parameter name: a letter or _, then letters, digits or _, at most {ParamDecl.MaxName} characters", nameof(name));
             if (type != ParamType.Float && type != ParamType.Bool)
                 throw new ArgumentException($"{type} is not a parameter type", nameof(type));
-            for (int i = 0; i < list.Count; i++)
+            lock (gate)
             {
-                if (list[i].Name != name) continue;
-                if (i < measured)
-                    throw new ArgumentException($"'{name}' is measured by the foundation itself: do not declare or send it", nameof(name));
-                if (list[i].Type != type)
-                    throw new ArgumentException($"'{name}' is already declared as {list[i].TypeWord}", nameof(name));
-                return false;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (list[i].Name != name) continue;
+                    if (i < measured)
+                        throw new ArgumentException($"'{name}' is measured by the foundation itself: do not declare or send it", nameof(name));
+                    if (list[i].Type != type)
+                        throw new ArgumentException($"'{name}' is already declared as {list[i].TypeWord}", nameof(name));
+                    return DeclareOutcome.AlreadyDeclared;
+                }
+                if (list.Count >= MaxCount)
+                    throw new ArgumentException($"a game declares at most {MaxCount} parameters in all: {MaxCount - measured} beside the foundation's {measured}", nameof(name));
+                list.Add(new ParamDecl(name, type));
+                return said ? DeclareOutcome.AddedAfterHello : DeclareOutcome.Added;
             }
-            if (list.Count >= MaxCount)
-                throw new ArgumentException($"a game declares at most {MaxCount} parameters in all: {MaxCount - measured} beside the foundation's {measured}", nameof(name));
-            list.Add(new ParamDecl(name, type));
-            snapshot = list.ToArray();
-            return true;
         }
 
         /// <summary>The declarations as they stand: a copy, safe to hand to another thread.</summary>
-        public ParamDecl[] ToArray() => (ParamDecl[])snapshot.Clone();
+        public ParamDecl[] ToArray()
+        {
+            lock (gate) return list.ToArray();
+        }
 
-        /// <summary>The declarations for a hello, from any thread: marks them <see cref="Said"/> first,
-        /// so a declaration racing this one is either in the list or reported as late.</summary>
+        /// <summary>The declarations for a hello, from any thread, and marks them <see cref="Said"/> in
+        /// the same step: a declaration racing this one is either in the list or AddedAfterHello.</summary>
         public ParamDecl[] ForHello()
         {
-            said = true;
-            return ToArray();
+            lock (gate)
+            {
+                said = true;
+                return list.ToArray();
+            }
         }
     }
 }

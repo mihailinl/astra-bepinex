@@ -276,7 +276,7 @@ public class BridgeLinkTests
         link.Start();
         await Task.WhenAny(firstSaid.Task, Task.Delay(5000));
         Assert.True(declarations.Said);
-        Assert.True(declarations.Declare("depth", ParamType.Float)); // late: the caller warns
+        Assert.Equal(DeclareOutcome.AddedAfterHello, declarations.Declare("depth", ParamType.Float)); // the caller warns
         declaredMore.SetResult(true);
         for (int i = 0; i < 60 && !served.IsCompleted; i++)
         {

@@ -204,7 +204,7 @@ namespace Astra.Sdk
         /// two).</exception>
         public GameIntegration DeclareParam(string name, ParamType type)
         {
-            if (Declared.Declare(name, type) && Declared.Said)
+            if (Declared.Declare(name, type) == DeclareOutcome.AddedAfterHello)
                 AstraSdk.Warn?.Invoke($"integration '{Id}' declared the parameter '{name}' after Astra was told this game's parameters: "
                     + "Astra hears of it only when it next connects, and keeps the shorter list until then. Declare every parameter where you register.");
             return this;

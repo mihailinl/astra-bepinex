@@ -69,9 +69,9 @@ public class DeclarationsAndWarningsTests
     public void declarations_keep_the_measured_ones_first_and_each_name_once()
     {
         var d = new ParamDeclarations(ParamDecl.Speed, ParamDecl.Airborne);
-        Assert.True(d.Declare("climbing", ParamType.Bool));
-        Assert.True(d.Declare("depth", ParamType.Float));
-        Assert.False(d.Declare("climbing", ParamType.Bool)); // again, the same: nothing
+        Assert.Equal(DeclareOutcome.Added, d.Declare("climbing", ParamType.Bool));
+        Assert.Equal(DeclareOutcome.Added, d.Declare("depth", ParamType.Float));
+        Assert.Equal(DeclareOutcome.AlreadyDeclared, d.Declare("climbing", ParamType.Bool)); // the same: nothing
         Assert.Equal(new[] { "speed", "airborne", "climbing", "depth" }, d.ToArray().Select(p => p.Name));
         Assert.Equal(new[] { ParamType.Float, ParamType.Bool, ParamType.Bool, ParamType.Float }, d.ToArray().Select(p => p.Type));
     }
@@ -112,6 +112,44 @@ public class DeclarationsAndWarningsTests
         var forHello = d.ForHello();
         Assert.True(d.Said);
         Assert.Equal(new[] { "speed", "a" }, forHello.Select(p => p.Name));
+        Assert.Equal(DeclareOutcome.AddedAfterHello, d.Declare("b", ParamType.Bool));
+        Assert.Equal(DeclareOutcome.AlreadyDeclared, d.Declare("a", ParamType.Bool));
+    }
+
+    /// <summary>A declaration racing a hello on another thread is in that hello's list or reported
+    /// as late — never neither (the game's thread declares while the link's thread says hello).</summary>
+    [Fact]
+    public void a_declaration_racing_a_hello_is_said_or_reported_late()
+    {
+        const int Trials = 20000;
+        var lists = new ParamDeclarations[Trials];
+        for (int i = 0; i < Trials; i++) lists[i] = new ParamDeclarations(ParamDecl.Speed);
+        var outcomes = new DeclareOutcome[Trials];
+        var hellos = new ParamDecl[Trials][];
+        int turn = -1, ready = 0;
+        var link = new System.Threading.Thread(() =>
+        {
+            for (int i = 0; i < Trials; i++)
+            {
+                while (System.Threading.Volatile.Read(ref turn) < i) { }
+                System.Threading.Interlocked.Increment(ref ready);
+                hellos[i] = lists[i].ForHello();
+            }
+        });
+        link.Start();
+        for (int i = 0; i < Trials; i++)
+        {
+            System.Threading.Volatile.Write(ref turn, i);
+            while (System.Threading.Volatile.Read(ref ready) <= i) { }
+            outcomes[i] = lists[i].Declare("x", ParamType.Bool);
+        }
+        link.Join();
+        for (int i = 0; i < Trials; i++)
+        {
+            bool inHello = hellos[i].Any(p => p.Name == "x");
+            Assert.True(inHello || outcomes[i] == DeclareOutcome.AddedAfterHello, $"trial {i}: neither in the hello nor reported late");
+            Assert.False(inHello && outcomes[i] == DeclareOutcome.AddedAfterHello, $"trial {i}: in the hello AND reported late");
+        }
     }
 
     /// <summary>A copy: what the link thread holds never changes under it.</summary>
