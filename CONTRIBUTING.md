@@ -52,7 +52,7 @@ for more Unity lines, robustness for IL2CPP builds, and new integrations.
 | `src/Astra.BepInEx6.IL2CPP` | The IL2CPP plugin (BepInEx 6, `net6.0`, the `IL2CPP` symbol). Output: `Astra.Unity.dll`. |
 | `src/Astra.Urp17`, `src/Astra.Urp14`, `src/Astra.Hdrp` | Render-pipeline adapters for Mono games (URP 17 in Unity 6, URP 13–16 in Unity 2022–2023, HDRP). Each compiles against that pipeline's own assemblies. |
 | `src/Astra.Unity.Sdk` | Packs both `Astra.Unity.dll` builds into the `Astra.Unity.Sdk` NuGet package that integrations compile against. |
-| `templates/` | The `dotnet new astra-integration` template. |
+| `templates/` | The `dotnet new astra-integration` template: a releasable integration repository (manifest, fetch and zip scripts, release workflow). Its `tools/fetch.sh` pins the foundation release it builds against by digest: bump it with each release. |
 | `tests/Astra.Bridge.Core.Tests` | xUnit tests for `Astra.Bridge.Core` (plus two end-to-end tests that need an engine). |
 | `tests/TestbedIntegration` | An integration made from the template, for the testbed. It compiles against this checkout's foundation, not the SDK package. |
 | `tools/` | `pack.sh` (build everything), `build-bundles.sh` (shader bundles), `check-game-members/` (metadata checks against a game), `make-runner-gi.sh` and `make-runner-il2cpp-gi.sh` (the release zips). |

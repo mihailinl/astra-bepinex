@@ -59,76 +59,53 @@ particles, a pipeline). Those are foundation fixes: see [`CONTRIBUTING.md`](../C
 
 ## 3. Create the project
 
-The template comes from this repository:
+The template comes from this repository (neither it nor the SDK package is on nuget.org yet):
 
 ```bash
 git clone https://github.com/mihailinl/astra-bepinex
 dotnet new install ./astra-bepinex/templates/astra-integration
-dotnet new astra-integration -n AstraMyGame --game "My Game" --id astra.mygame --runtime mono --steamAppId 1234560
-cd AstraMyGame          # your new repository: git init here
+dotnet new astra-integration -n AstraMyGame --game "My Game" --id astra.mygame --runtime mono \
+  --steamAppId 1234560 --owner your-github-name
+cd AstraMyGame && git init      # your new repository
 ```
 
 | option | meaning |
 |---|---|
 | `-n` | the project, assembly and folder name |
 | `--game` | the game's name as players know it (required) |
+| `--steamAppId` | the game's Steam app id; its store page address has it (required) |
 | `--id` | your integration's id: its BepInEx GUID, and the id in `astra-gi.toml` (`astra.<game>`) |
-| `--runtime` | `mono` (BepInEx 5) or `il2cpp` (BepInEx 6) |
-| `--steamAppId` | the game's Steam app id (its store page address has it) |
+| `--runtime` | `mono` (BepInEx 5) or `il2cpp` (BepInEx 6, [step 11](#11-il2cpp-integrations)) |
+| `--owner` | the GitHub user or organisation that will own the repository: its address in `astra-gi.toml`, the author, the `LICENSE`'s copyright |
+| `--exe` | the game's executable, relative to its folder (default: `<game>.exe`) |
 | `--gameDir` | the game's folder; leave it out (see below) |
 
-You get `AstraMyGame.csproj`, `Plugin.cs`, `astra-item.toml` (a proposed marketplace manifest that
-nothing reads yet), `README.md` and `.gitignore`. The template does not create `astra-gi.toml` or a
-release workflow yet; steps 8 and 9 add them.
+You get a repository that can already make a release:
 
-### The SDK package
-
-`Astra.Unity.Sdk` is not on nuget.org yet. Every foundation release on GitHub carries it. Put it in
-a `nuget-local` folder inside your project folder:
-
-```bash
-mkdir nuget-local      # in AstraMyGame/
-gh release download v0.6.1 -R mihailinl/astra-bepinex -p 'Astra.Unity.Sdk.*.nupkg' -D nuget-local
-# without gh: curl -L -o nuget-local/Astra.Unity.Sdk.0.6.1.nupkg \
-#   https://github.com/mihailinl/astra-bepinex/releases/download/v0.6.1/Astra.Unity.Sdk.0.6.1.nupkg
-```
-
-Add a `nuget.config` next to your `.csproj` (a relative path in it is relative to the file):
-
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <packageSources>
-    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
-    <add key="BepInEx" value="https://nuget.bepinex.dev/v3/index.json" />
-    <add key="astra-local" value="nuget-local" />
-  </packageSources>
-</configuration>
-```
-
-Add `nuget-local/` to your `.gitignore` (and, for step 8, `bepinex-dist/`,
-`BepInEx_win_x64_5.4.23.5.zip`, `foundation/`, `foundation-mono/` and `astra-gi.zip`). Then change two things in the `.csproj`:
-
-1. **Pin the SDK** to the version you downloaded. The template says `Version="[0.3,1)"`, and NuGet
-   takes the LOWEST version in a range that it can find: an old SDK in your NuGet cache wins, and it
-   may lack API this guide uses (`GameType` came after 0.3). Write the version you build against:
-
-   ```xml
-   <PackageReference Include="Astra.Unity.Sdk" Version="[0.6.1,1)" ExcludeAssets="runtime" PrivateAssets="all" />
-   ```
-
-   The SDK version also sets the oldest foundation your plugin loads with: `AstraSdk.Dependency` in
-   your `[BepInDependency]` starts at that version. Keep `ExcludeAssets="runtime"`: your plugin never ships
-   the foundation's DLLs.
-2. **Lock the packages**, so your CI restores exactly what you tested: add
-   `<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>` to the first `PropertyGroup` and
-   commit the `packages.lock.json` that the next restore writes.
+| file | what it is |
+|---|---|
+| `AstraMyGame.csproj` | the plugin. `<AstraVersion>` is the foundation release it builds against (0.6.1), and the SDK's range starts there; `packages.lock.json` pins every package |
+| `Plugin.cs` | your code (step 5) |
+| `astra-gi.toml` | the manifest Astra installs from (step 8) |
+| `tools/fetch.sh` | downloads that release's SDK package into `nuget-local/` and its "Astra for any Unity game" zip into `foundation/`, each checked against a pinned SHA-256 |
+| `tools/make-astra-gi.sh` | lays out `astra-gi.zip` (step 8) |
+| `.github/workflows/release.yml` | builds `astra-gi.zip` on a pushed tag and attaches it to the release (step 9; Mono only) |
+| `nuget.config` | nuget.org, BepInEx's feed, and `nuget-local/` for the SDK |
+| `LICENSE` | MIT, in your name, like the published integrations. Want another licence? Change it and `license` in `astra-gi.toml` |
+| `astra-item.toml` | a proposed marketplace manifest that nothing reads yet |
+| `README.md`, `.gitignore` | what players and pack authors read; what git leaves out (`nuget-local/`, `foundation/`, `astra-gi.zip`) |
 
 Build:
 
 ```bash
-dotnet build -c Release      # → bin/Release/netstandard2.1/AstraMyGame.dll and astra-item.json
+bash tools/fetch.sh            # once, and after every foundation bump
+dotnet build -c Release        # → bin/Release/netstandard2.1/AstraMyGame.dll and astra-item.json
 ```
+
+The first restore writes `packages.lock.json`; commit it, because the release workflow restores
+exactly what it pins. The SDK version also sets the oldest foundation your plugin loads with:
+`AstraSdk.Dependency` in your `[BepInDependency]` starts at that version. Keep
+`ExcludeAssets="runtime"` on the SDK: your plugin never ships the foundation's DLLs.
 
 **Leave `GameDir` empty.** Then the project compiles against Unity's public API
 (`UnityEngine.Modules`) and nothing of the game, and you reach the game's own types by name through
@@ -506,39 +483,29 @@ Astra installs one file from your release: `astra-gi.zip`, with an `astra-gi.tom
 root. The manifest is data only: which game, which files go where, how to launch.
 [`GAME-INTEGRATION-MANIFEST.md`](GAME-INTEGRATION-MANIFEST.md) is the full contract.
 
-The easiest start is astra-peak's files (MIT): copy `astra-gi.toml`, `doorstop_config.ini`,
-`licenses/` and `tools/make-astra-gi.sh` into your repository.
+The template wrote `astra-gi.toml` from your options. Check:
 
-In `astra-gi.toml`, change:
+- `[integration]`: `id`, `name`, `version`, `authors`, `license`, `repo`;
+- `[target]`: `steam_appid`, `exe` (relative to the game folder: `--exe` set it, else `<game>.exe`),
+  `platforms`. Keep `anti_cheat = "none"`: Astra refuses anything else.
 
-- `[integration]`: `id` (your `--id`), `name`, `version`, `authors`, `license`, `repo`;
-- `[target]`: `steam_appid`, `exe` (relative to the game folder), `platforms`. Keep
-  `anti_cheat = "none"`: Astra refuses anything else.
+Keep `[[files]]`, `[[game_files]]`, `[launch]` and `[[config_writes]]` as they are. The `winhttp.dll`
+digest is the one of the Doorstop proxy that BepInEx ships, and the zip carries that very file.
 
-Keep `[[files]]`, `[[game_files]]`, `[launch]` and `[[config_writes]]` as they are. The
-`winhttp.dll` digest is the one of BepInEx 5.4.23.5's proxy; change it only if you bundle another
-BepInEx.
-
-In `tools/make-astra-gi.sh`, change `ASSEMBLY_NAME` and `PLUGIN_FOLDER` (your assembly name), `TFM`
-if yours is not `netstandard2.1`, and the name of your licence file (`astra-peak-LICENSE.txt`). The
-script needs three inputs:
+Lay out the zip:
 
 ```bash
-dotnet build -c Release                                       # your plugin
-curl -LO https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.5/BepInEx_win_x64_5.4.23.5.zip
-unzip BepInEx_win_x64_5.4.23.5.zip -d bepinex-dist             # BepInEx 5 (BEPINEX_DIST)
-gh release download v0.6.1 -R mihailinl/astra-bepinex -p astra-gi.zip -D foundation
-unzip foundation/astra-gi.zip -d foundation-mono                 # holds BepInEx/plugins/Astra/
-FOUNDATION_DIR=foundation-mono bash tools/make-astra-gi.sh
+bash tools/fetch.sh && dotnet build -c Release && bash tools/make-astra-gi.sh
 ```
 
-The zip it writes holds `astra-gi.toml`, BepInEx 5's `core`, the foundation in
-`BepInEx/plugins/Astra/` exactly as released, your plugin in `BepInEx/plugins/AstraMyGame/`,
-`winhttp.dll` and `doorstop_config.ini` (shipped with Doorstop off, so Steam's own Play stays
-vanilla), and the licences of everything bundled.
+`astra-gi.zip` is the foundation's own "Astra for any Unity game" zip of the release you build
+against (BepInEx 5's `core`, `winhttp.dll` and `doorstop_config.ini`, shipped with Doorstop off so
+Steam's own Play stays vanilla, the foundation in `BepInEx/plugins/Astra/` exactly as released, and
+their licences), plus your plugin in `BepInEx/plugins/AstraMyGame/`, your `astra-gi.toml` in place of
+the foundation's, and your `LICENSE`.
 
 The foundation travels in your zip unchanged. Never copy its code into your plugin and never
-modify its DLLs. Bundle a foundation at least as new as the SDK you compiled against.
+modify its DLLs.
 
 Check the zip with the launcher Astra uses (it needs Rust). `inspect` reads and validates the
 manifest and the zip, and installs nothing:
@@ -551,24 +518,14 @@ cargo run --release --manifest-path ../astra-game-launcher/Cargo.toml --bin astr
 
 ## 9. Release it on GitHub
 
-The published integrations build their zip in GitHub Actions from public inputs only: the SDK
-package, BepInEx's NuGet packages, `UnityEngine.Modules`, BepInEx's release and the foundation's
-release, each pinned by its SHA-256. Copy astra-peak's `.github/workflows/release.yml`. On a pushed
-tag `v*` it:
+The template's `.github/workflows/release.yml` builds the zip in GitHub Actions from public inputs
+only. On a pushed tag `v*` it:
 
-1. downloads the SDK package from the foundation's release and checks its digest;
-2. restores in locked mode (your `packages.lock.json`) and builds with warnings as errors;
-3. downloads BepInEx 5.4.23.5 and the foundation's `astra-gi.zip`, checking both digests;
+1. checks that the tag, `<Version>` in the `.csproj`, `[integration].version` in `astra-gi.toml` and
+   `version` in `astra-item.toml` all name the same version;
+2. runs `tools/fetch.sh`: the SDK and the foundation's zip, each checked against its SHA-256;
+3. restores in locked mode (your `packages.lock.json`) and builds with warnings as errors;
 4. runs `tools/make-astra-gi.sh` and attaches `astra-gi.zip` to the tag's release.
-
-In the workflow, change `ASSEMBLY_NAME`, `PLUGIN_FOLDER`, `TFM`, the two SDK lines
-(`ASTRA_SDK_URL`, `ASTRA_SDK_SHA256`, and the file name the download step writes) and the two
-foundation lines (`FOUNDATION_ASSET_URL`, `FOUNDATION_ASSET_SHA256`). Take each digest with
-`sha256sum` of the file you downloaded. The SDK file must be the one your `packages.lock.json`
-pinned. The workflow downloads the SDK into `nuget-local/` at the repository root and then adds that
-folder as a package source; your `nuget.config` already names it, so **delete the step "Add the
-local SDK feed"** (`dotnet nuget add source` fails on a name that is already there). This assumes
-your `.csproj` and `nuget.config` sit at the repository root, as astra-peak's do.
 
 To release:
 
@@ -581,9 +538,15 @@ To release:
 **A tag is final.** Astra records the zip's digest per tag and refuses a tag whose zip changed. To
 fix anything, publish a new tag.
 
-**A newer foundation for your players** is a new release of yours: bump the foundation pins (and
-the SDK pins if you want its new API) and tag. Your code rarely needs a change: the SDK only grows
-within a major version.
+**A newer foundation for your players** is a new release of yours: set `<AstraVersion>` in the
+`.csproj` to the foundation release, add that release's line (its two SHA-256 digests) to the table
+in `tools/fetch.sh`, run `bash tools/fetch.sh` and `dotnet restore --force-evaluate` (it rewrites
+`packages.lock.json`: commit it), build, test, and tag. Your code rarely needs a change: the SDK only
+grows within a major version.
+
+The four published integrations predate the template: their workflows download BepInEx on its own
+and the foundation's zip beside it. The template takes BepInEx from the foundation's zip, which
+carries BepInEx's official release unmodified, so there are two pins to bump instead of four.
 
 Share your repository's address. There is no catalogue yet: Astra shows every integration as
 **Experimental**, and does not review its code.
@@ -610,13 +573,16 @@ The launcher is open source: [astra-game-launcher](https://github.com/mihailinl/
 ## 11. IL2CPP integrations
 
 - `--runtime il2cpp` makes a BepInEx 6 plugin: `net6.0`, a `BasePlugin` with `Load()` instead of
-  `Awake()`.
+  `Awake()`. Its `astra-gi.toml` installs BepInEx 6 and the .NET runtime it hosts plugins in
+  (`dotnet/`), and `tools/fetch.sh` takes the foundation's IL2CPP zip (`astra-gi-il2cpp.zip`).
 - It compiles against the interop assemblies BepInEx 6 generates from the game on its first start
   (`BepInEx/interop`). Set `GameDir` to the folder that holds `BepInEx/interop`: with Astra's
-  launcher, the game's profile. Without it the build fails (no Unity types).
-- Those assemblies are generated from the game's files, so the public-inputs CI of step 9 does not
-  work as it is. No IL2CPP integration is published yet: open an issue on astra-bepinex before you
-  plan a release.
+  launcher, the game's profile (`dotnet build -c Release -p:GameDir=<profile>`). Without it the
+  build fails (no Unity types).
+- Those assemblies are generated from the game's files, so no CI can build your plugin, and the
+  template makes no workflow for IL2CPP. Release by hand: build, `bash tools/make-astra-gi.sh`, then
+  `gh release create vX.Y.Z astra-gi.zip`. No IL2CPP integration is published yet: open an issue
+  on astra-bepinex if you plan one.
 - Your own Unity API calls can be stripped from the game too. Run the audit on YOUR plugin:
   `check-game-members il2cpp <your plugin.dll> <profile>/BepInEx/interop`
   ([`CONTRIBUTING.md`](../CONTRIBUTING.md#il2cpp-games-the-stripping-audit)).
@@ -651,8 +617,8 @@ assets.
 - [ ] Only raw facts as parameters, listed in your README.
 - [ ] No game files and no decompiled code in your repository or your zip.
 - [ ] `GameDir` empty: the release builds in CI from public inputs.
-- [ ] The SDK version pinned; the foundation in your zip at least as new.
-- [ ] The licences of everything bundled are in the zip.
+- [ ] `packages.lock.json` committed; `<AstraVersion>` names the foundation your zip bundles.
+- [ ] The licences of everything bundled are in the zip (`tools/make-astra-gi.sh` puts them there).
 - [ ] `LogOutput.log` shows `is in charge`, no `switched off`, and `GameType.Missing` is empty.
 - [ ] `inspect` accepts the zip.
 - [ ] The version bumped in three places, a new tag.

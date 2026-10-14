@@ -1,0 +1,52 @@
+name: release
+# On a pushed tag "v*": build this integration from PUBLIC inputs only and attach astra-gi.zip — the
+# one file Astra installs — to that tag's GitHub release. The inputs: NuGet packages pinned by
+# packages.lock.json, and the Astra foundation's release files (its SDK, and its zip with BepInEx),
+# each checked against the SHA-256 tools/fetch.sh pins. This workflow never touches the game's files,
+# and never could: GitHub Actions has no copy of the game. So keep GameDir empty and reach the
+# game's types through Astra.Sdk.GameType.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # to attach astra-gi.zip to the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this integration
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: The tag, the .csproj, astra-gi.toml and astra-item.toml name one version
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          grep -q "<Version>$v</Version>" AstraIntegration.csproj || { echo "::error::the tag says $v; <Version> in AstraIntegration.csproj does not"; exit 1; }
+          grep -Eq "^version = \"$v\"" astra-gi.toml || { echo "::error::the tag says $v; [integration].version in astra-gi.toml does not"; exit 1; }
+          grep -Eq "^version = \"$v\"" astra-item.toml || { echo "::error::the tag says $v; version in astra-item.toml does not"; exit 1; }
+
+      - name: Fetch the Astra SDK and the foundation (digest-checked)
+        run: bash tools/fetch.sh
+
+      - name: Restore (locked — packages.lock.json pins every package)
+        run: dotnet restore --locked-mode
+
+      - name: Build
+        run: dotnet build -c Release --no-restore -p:TreatWarningsAsErrors=true
+
+      - name: Lay out astra-gi.zip
+        run: bash tools/make-astra-gi.sh
+
+      - name: List astra-gi.zip's entries
+        run: unzip -l astra-gi.zip
+
+      - name: Attach astra-gi.zip to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: astra-gi.zip

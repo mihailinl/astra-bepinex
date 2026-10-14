@@ -1,0 +1,73 @@
+schema = 1
+# What Astra installs from this repository's release (astra-gi.zip, laid out by tools/make-astra-gi.sh).
+# The contract: docs/GAME-INTEGRATION-MANIFEST.md in https://github.com/mihailinl/astra-bepinex
+
+[integration]                      # metadata: shown to the player, never acted on
+id = "astra.integration-id"
+name = "Astra for GAME_NAME"
+version = "0.1.0"                  # = <Version> in AstraIntegration.csproj and version in astra-item.toml
+authors = ["GITHUB_OWNER"]
+license = "MIT"                    # = LICENSE
+repo = "https://github.com/GITHUB_OWNER/AstraIntegration"
+
+[target]                           # which game
+steam_appid = 0000000
+exe = "GAME_EXE"                   # relative to the game folder
+platforms = ["windows-x64", "linux-proton"]
+anti_cheat = "none"                # Astra refuses anything else
+
+# Into the PROFILE (Astra's own folder for this game; never the game folder).
+[[files]]
+from = "BepInEx/core/**"           # BepInEx's core (paths inside the zip; ** = everything below)
+to = "${profile}/BepInEx/core/"
+#if (!mono)
+
+[[files]]
+from = "dotnet/**"                 # the .NET runtime BepInEx 6 hosts its plugins in
+to = "${profile}/dotnet/"
+#endif
+
+[[files]]
+from = "BepInEx/plugins/**"        # the foundation (Astra/) AND this integration (AstraIntegration/)
+to = "${profile}/BepInEx/plugins/"
+
+# Beside the game's exe — the only files that touch the game folder. Each one is on the consent
+# sheet, pinned by its digest, backed up if it replaces a game file and restored on uninstall.
+[[game_files]]
+from = "winhttp.dll"               # Doorstop's proxy, as BepInEx ships it
+to = "${game}/winhttp.dll"
+sha256 = "8c6cdbc38836dee87e3368f5de1994d7c0ccebf29e4ce7aba3c0981f9375412c"
+
+[[game_files]]
+from = "doorstop_config.ini"       # ships with enabled = false: Steam's own Play stays vanilla
+to = "${game}/doorstop_config.ini"
+
+[launch]
+# An argv ARRAY, never a shell string. Placeholders are filled per element (as Windows paths,
+# Z:\…, under Proton).
+#if (mono)
+args = ["--doorstop-enabled", "true",
+        "--doorstop-target-assembly", "${profile}/BepInEx/core/BepInEx.Preloader.dll"]
+#else
+args = ["--doorstop-enabled", "true",
+        "--doorstop-target-assembly", "${profile}/BepInEx/core/BepInEx.Unity.IL2CPP.dll",
+        "--doorstop-clr-corlib-dir", "${profile}/dotnet",
+        "--doorstop-clr-runtime-coreclr-path", "${profile}/dotnet/coreclr.dll"]
+#endif
+# Wine DLL override for the game's Proton prefix (Linux), written into that prefix only.
+proton_dll_overrides = { winhttp = "native,builtin" }
+
+# INI keys set at every Play, inside the profile only.
+[[config_writes]]
+file = "${profile}/BepInEx/config/astra.unity-foundation.cfg"
+section = "Connection"
+set = { Port = "${bridge_port}", Token = "${bridge_token}" }
+#if (!mono)
+
+# BepInEx 6 opens a console window with its log by default: a player sees nothing to act on there,
+# and the log is in the profile's BepInEx/LogOutput.log anyway.
+[[config_writes]]
+file = "${profile}/BepInEx/config/BepInEx.cfg"
+section = "Logging.Console"
+set = { Enabled = "false" }
+#endif

@@ -196,12 +196,14 @@ says that another mod loader is installed there.
 
 ## 6. Building `astra-gi.zip` in your own CI
 
-Any CI works; the zip is all Astra sees. Ours (the four integrations under
-`github.com/mihailinl/astra-*`) use a GitHub Actions workflow on a tag:
+Any CI works; the zip is all Astra sees. The integration template (`dotnet new astra-integration`,
+[`WRITE-AN-INTEGRATION.md`](WRITE-AN-INTEGRATION.md) §9) writes a GitHub Actions workflow that runs
+on a tag; the four integrations under `github.com/mihailinl/astra-*` use an older form of it:
 
 - it builds against public packages only: the Astra SDK, BepInEx.Core and UnityEngine.Modules;
 - it never uses the game's own files;
 - game types are reached through the SDK's reflection helper.
 
-It then downloads the pinned BepInEx release, verifies its digest, lays out the zip as in §3 and
+It then downloads the foundation's pinned release zip (which carries BepInEx's official release;
+the older form downloads BepInEx on its own), verifies its digest, lays out the zip as in §3 and
 attaches it to the release.

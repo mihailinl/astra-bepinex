@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- `dotnet new install Astra.Unity.Templates` → `dotnet new astra-integration`. -->
+  <!-- The astra-integration template as a package (tools/pack.sh writes it to artifacts/nuget):
+       `dotnet new install artifacts/nuget/Astra.Unity.Templates.<version>.nupkg`, or straight from a
+       clone, `dotnet new install templates/astra-integration`; then `dotnet new astra-integration`.
+       Neither the templates nor the SDK are on nuget.org. -->
   <PropertyGroup>
     <PackageType>Template</PackageType>
     <PackageId>Astra.Unity.Templates</PackageId>

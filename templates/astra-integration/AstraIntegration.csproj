@@ -19,9 +19,15 @@
     <Nullable>disable</Nullable>
     <BepInExPluginGuid>astra.integration-id</BepInExPluginGuid>
     <BepInExPluginName>Astra for GAME_NAME</BepInExPluginName>
+    <!-- This integration's version: keep it equal to [integration].version in astra-gi.toml and
+         version in astra-item.toml (the release workflow checks all three against the tag). -->
     <Version>0.1.0</Version>
     <SteamAppId>0000000</SteamAppId>
-    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+    <!-- The Astra foundation release this builds against: its SDK, and (tools/fetch.sh) the
+         foundation and BepInEx that astra-gi.zip bundles. A newer one: see tools/fetch.sh. -->
+    <AstraVersion>0.6.1</AstraVersion>
+    <!-- packages.lock.json pins every package by content hash; commit it. CI restores locked. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <Import Project="GameDir.props.user" Condition="Exists('GameDir.props.user')" />
   <PropertyGroup>
@@ -29,7 +35,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Astra.Unity.Sdk" Version="[0.3,1)" ExcludeAssets="runtime" PrivateAssets="all" />
+    <!-- NuGet takes the LOWEST version a range allows: the floor is the SDK you build against. -->
+    <PackageReference Include="Astra.Unity.Sdk" Version="[$(AstraVersion),1)" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
 <!--#if (mono) -->
     <PackageReference Include="BepInEx.Core" Version="5.4.21" PrivateAssets="all" />

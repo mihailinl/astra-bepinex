@@ -49,9 +49,9 @@
     "steamAppId": {
       "type": "parameter",
       "datatype": "integer",
+      "isRequired": true,
       "replaces": "0000000",
-      "defaultValue": "0000000",
-      "description": "The game's Steam app id (its store page URL has it)."
+      "description": "The game's Steam app id (its store page URL has it). Astra keys the game's profile on it."
     },
     "gameDir": {
       "type": "parameter",
@@ -59,6 +59,19 @@
       "replaces": "GAME_DIR_PATH",
       "defaultValue": "",
       "description": "Where the game is installed (its assemblies are referenced to compile, never shipped)."
+    },
+    "owner": {
+      "type": "parameter",
+      "datatype": "text",
+      "replaces": "GITHUB_OWNER",
+      "defaultValue": "your-github-name",
+      "description": "The GitHub user or organisation that will own this repository: its address in astra-gi.toml, the author and the LICENSE's copyright."
+    },
+    "exe": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "",
+      "description": "The game's executable, relative to its folder (default: <game>.exe)."
     },
     "mono": {
       "type": "computed",
@@ -101,6 +114,125 @@
           }
         ]
       }
+    },
+    "exeDefault": {
+      "type": "generated",
+      "generator": "join",
+      "parameters": {
+        "symbols": [
+          {
+            "type": "ref",
+            "value": "game"
+          },
+          {
+            "type": "const",
+            "value": ".exe"
+          }
+        ]
+      }
+    },
+    "exeName": {
+      "type": "generated",
+      "generator": "coalesce",
+      "replaces": "GAME_EXE",
+      "parameters": {
+        "sourceVariableName": "exe",
+        "fallbackVariableName": "exeDefault"
+      }
+    },
+    "copyrightYear": {
+      "type": "generated",
+      "generator": "now",
+      "replaces": "COPYRIGHT_YEAR",
+      "parameters": {
+        "format": "yyyy"
+      }
     }
-  }
+  },
+  "SpecialCustomOperations": {
+    "**/*.sh": {
+      "operations": [
+        {
+          "type": "conditional",
+          "configuration": {
+            "if": [
+              "#if"
+            ],
+            "else": [
+              "#else"
+            ],
+            "elseif": [
+              "#elif"
+            ],
+            "endif": [
+              "#endif"
+            ],
+            "trim": true,
+            "wholeLine": true,
+            "evaluator": "C++"
+          }
+        }
+      ]
+    },
+    "**/*.toml": {
+      "operations": [
+        {
+          "type": "conditional",
+          "configuration": {
+            "if": [
+              "#if"
+            ],
+            "else": [
+              "#else"
+            ],
+            "elseif": [
+              "#elif"
+            ],
+            "endif": [
+              "#endif"
+            ],
+            "trim": true,
+            "wholeLine": true,
+            "evaluator": "C++"
+          }
+        }
+      ]
+    },
+    "**/*.md": {
+      "operations": [
+        {
+          "type": "conditional",
+          "configuration": {
+            "if": [
+              "#if"
+            ],
+            "else": [
+              "#else"
+            ],
+            "elseif": [
+              "#elif"
+            ],
+            "endif": [
+              "#endif"
+            ],
+            "trim": true,
+            "wholeLine": true,
+            "evaluator": "C++"
+          }
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "modifiers": [
+        {
+          "condition": "(!mono)",
+          "exclude": [
+            ".github/**"
+          ]
+        }
+      ]
+    }
+  ]
 }

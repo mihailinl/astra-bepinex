@@ -45,7 +45,10 @@ namespace AstraIntegration
 
             // Raw FACTS for her animation set, every frame: "climbing = true", never "play climb".
             // What a fact means is her animation set's business, so a pack author can animate it.
+            // List each one in README.md.
             // astra.OnFrame(f => f.Params.Set("swimming", MyGame.LocalPlayer.InWater));
+            // With an SDK newer than 0.6.1, also declare it (using Astra.Bridge;), so Astra can show
+            // the player what this game sends: astra.DeclareParam("swimming", ParamType.Bool);
 
             // Animation by name on a game event: astra.Cues.Play("wave");
         }

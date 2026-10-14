@@ -1,3 +1,8 @@
 bin/
 obj/
 GameDir.props.user
+# What tools/fetch.sh downloads, and what tools/make-astra-gi.sh writes
+nuget-local/*
+!nuget-local/.gitkeep
+foundation/
+astra-gi.zip
