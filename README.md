@@ -14,6 +14,10 @@ games (BepInEx 6), built from one code base.
 
 - **Unity 2021.3 and newer** (2021.3 LTS, 2022, 6000) — the **Built-in**, **URP** and **HDRP**
   render pipelines.
+- **Unity 2020.3** (Mono) — the **Built-in** pipeline, run on the testbed. URP and HDRP games on
+  2020 are untested (that line has no end-of-frame event: she is drawn right after the main
+  camera). **Unity 2019.4** is not supported yet: its shader bundle still has to
+  be built (see Build).
 - **Windows**, and **Linux through Proton** (see below).
 - **BepInEx 5, Mono** — the tested, supported path.
 - **BepInEx 6, IL2CPP, is experimental**: it builds and runs on the testbed, but has not yet been
@@ -131,14 +135,18 @@ dotnet test tests/Astra.Bridge.Core.Tests          # + ASTRA_ENGINE=<engine bina
 ```
 
 The composite shader is a Unity asset bundle, built per Unity line and platform and embedded in the
-plugins: today 2021 (2021.3.35), 2022 and 6000. To rebuild one line's, with that line's editor:
+plugins: today 2020 (2020.3.49), 2021 (2021.3.35), 2022 (2022.3.62) and 6000 (6000.3.18). To
+rebuild one line's, with that line's editor:
 
 ```bash
 tools/build-bundles.sh ~/Unity/Hub/Editor/<version>/Editor/Unity
 ```
 
-A bundle loads in its own Unity line and newer ones, never older: bundles for older lines
-(2019–2020) are welcome as contributions — build the same project with that editor.
+A bundle loads in its own Unity line and newer ones, never older, and the plugin picks the newest
+one not newer than the game's line — so a new line needs only its bundle file. The 2019 line's is
+welcome as a contribution (the 2019.4 editor runs here but refuses batch mode without a legacy
+licence file). The build fails if any pass of the shader does not compile for one of the bundle's
+graphics APIs: a pass left out of a bundle makes the whole shader unsupported in every game.
 
 An IL2CPP game's build STRIPS every engine type and member it never uses, and a plugin method that
 names a stripped one fails the first time it runs. Check the IL2CPP flavour against a game's
@@ -155,7 +163,14 @@ build removed).
 
 `unity/AstraTestbed` is a tiny URP game built in code (walls, a ramp, stairs, a player that walks,
 runs and jumps, a camera that whips round) to test both plugins without a real game — as a Mono and
-an IL2CPP Linux player (`TestbedBuild.Build`).
+an IL2CPP Linux player (`TestbedBuild.Build`). `-astraScene glass` is the transparents test (a pane
+of glass and sparks in front of her, a cloud of sparks behind her). The same game in the Built-in
+pipeline, or with an older line's URP:
+
+```bash
+tools/build-testbed.sh ~/Unity/Hub/Editor/2020.3.49f1/Editor/Unity <project dir> builtin
+tools/build-testbed.sh ~/Unity/Hub/Editor/2022.3.62f2/Editor/Unity <project dir> urp:14.0.12
+```
 
 ## License
 
