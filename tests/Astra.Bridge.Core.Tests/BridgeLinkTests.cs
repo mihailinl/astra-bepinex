@@ -165,6 +165,8 @@ public class BridgeLinkTests
             await Send(ws, "{\"t\":\"hello\",\"v\":1,\"engine\":\"e\",\"ver\":\"0\",\"shm\":\"x\",\"maxW\":8,\"maxH\":8,\"caps\":[\"hello.params\",\"warn\"]}");
             for (int i = 0; i < 3; i++)
                 await Send(ws, "{\"t\":\"warn\",\"code\":\"param_undeclared\",\"name\":\"climbing\"}");
+            // The foundation's own measured parameter: nothing a reader of the console can act on.
+            await Send(ws, "{\"t\":\"warn\",\"code\":\"param_undeclared\",\"name\":\"speed\"}");
             await Send(ws, "{\"t\":\"warn\",\"code\":\"state_unknown\",\"name\":\"seat\"}");
             await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
         });
@@ -175,7 +177,7 @@ public class BridgeLinkTests
         link.Log = s => { lock (logged) logged.Add(s); };
         link.Warn = s => { lock (warned) warned.Add(s); };
         link.Integration = "astra.test";
-        link.Params = new[] { ParamDecl.Speed, ParamDecl.Airborne, new ParamDecl("climbing", ParamType.Bool) };
+        link.Params = () => new[] { ParamDecl.Speed, ParamDecl.Airborne, new ParamDecl("climbing", ParamType.Bool) };
         link.MarkWanted();
         link.Start();
         await Task.WhenAny(served, Task.Delay(5000));
@@ -217,7 +219,7 @@ public class BridgeLinkTests
         });
 
         using var link = new BridgeLink("test", port, retryMs: 250);
-        link.Params = new[] { ParamDecl.Speed };
+        link.Params = () => new[] { ParamDecl.Speed };
         link.MarkWanted();
         link.Start();
         for (int i = 0; i < 60 && !served.IsCompleted; i++)
@@ -233,6 +235,62 @@ public class BridgeLinkTests
             Assert.Contains("\"params\":", hellos[0]);
             Assert.DoesNotContain("\"params\":", hellos[1]);
             Assert.Contains("\"caps\":[\"warn\"]", hellos[1]);
+        }
+    }
+
+    /// <summary>F3: the declarations are ASKED at every hello, never copied once: a parameter declared
+    /// between two connections is in the second hello, and the first hello marks them said.</summary>
+    [Fact]
+    public async Task each_hello_says_the_declarations_as_they_are_then()
+    {
+        int port = FreePort();
+        var http = new HttpListener();
+        http.Prefixes.Add($"http://127.0.0.1:{port}/");
+        http.Start();
+        var hellos = new List<string>();
+        var firstSaid = new TaskCompletionSource<bool>();
+        var declaredMore = new TaskCompletionSource<bool>();
+        var declarations = new ParamDeclarations(ParamDecl.Speed, ParamDecl.Airborne);
+        declarations.Declare("climbing", ParamType.Bool);
+        var served = Task.Run(async () =>
+        {
+            for (int n = 0; n < 2; n++)
+            {
+                var ctx = await http.GetContextAsync();
+                var ws = (await ctx.AcceptWebSocketAsync(null)).WebSocket;
+                var text = await Receive(ws);
+                lock (hellos) hellos.Add(text);
+                await Send(ws, "{\"t\":\"hello\",\"v\":1,\"engine\":\"e\",\"ver\":\"0\",\"shm\":\"x\",\"maxW\":8,\"maxH\":8,\"caps\":[\"hello.params\",\"warn\"]}");
+                if (n == 0)
+                {
+                    firstSaid.SetResult(true);
+                    await declaredMore.Task; // the game declares one more while connected
+                }
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
+            }
+        });
+
+        using var link = new BridgeLink("test", port, retryMs: 250);
+        link.Params = () => declarations.ForHello();
+        link.MarkWanted();
+        link.Start();
+        await Task.WhenAny(firstSaid.Task, Task.Delay(5000));
+        Assert.True(declarations.Said);
+        Assert.True(declarations.Declare("depth", ParamType.Float)); // late: the caller warns
+        declaredMore.SetResult(true);
+        for (int i = 0; i < 60 && !served.IsCompleted; i++)
+        {
+            link.MarkWanted();
+            await Task.Delay(50);
+        }
+        http.Stop();
+
+        lock (hellos)
+        {
+            Assert.Equal(2, hellos.Count);
+            Assert.Contains("\"climbing\"", hellos[0]);
+            Assert.DoesNotContain("\"depth\"", hellos[0]);
+            Assert.Contains("{\"name\":\"climbing\",\"type\":\"bool\"},{\"name\":\"depth\",\"type\":\"float\"}", hellos[1]);
         }
     }
 

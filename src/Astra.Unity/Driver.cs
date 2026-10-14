@@ -58,6 +58,9 @@ namespace Astra.Unity
         readonly DefaultCamera defaultCamera = new DefaultCamera();
         GameIntegration integration;
         GameIntegration dropped; // an integration that faulted: not taken up again until it re-registers
+        /// <summary>The declarations of the integration in charge, for the link's thread to read at each
+        /// hello (<see cref="TellLink"/>).</summary>
+        volatile ParamDeclarations declared;
         Vector3 lastPosition, velocity;
         Vector3 goodPosition, goodFacing = Vector3.forward;
         float scale = 1;
@@ -103,6 +106,7 @@ namespace Astra.Unity
         {
             log = source;
             settings = s;
+            AstraSdk.Warn = m => source.LogWarning(m);
         }
 
         /// <summary>Show or hide her (the hotkey).</summary>
@@ -250,12 +254,12 @@ namespace Astra.Unity
                     // Only her rectangle of each picture (flag 128), where this game can copy between
                     // textures on the GPU — a few hundred KB a frame on the main thread, not ~16 MB.
                     link.Crop = Picture.CanTakeCropped;
-                    link.Game = integration?.Game ?? Application.productName;
                     link.Foundation = AstraSdk.Version;
-                    link.Integration = integration?.Id;
-                    // What it sends, for Astra to show the player: only with an integration (the engine
-                    // keeps the list per integration id, and nothing without one).
-                    link.Params = integration?.Declared.ToArray();
+                    // What it sends, for Astra to show the player, asked at EVERY hello (a reconnect
+                    // says the list as it is then): only with an integration (the engine keeps the
+                    // list per integration id, and nothing without one).
+                    link.Params = () => declared?.ForHello();
+                    TellLink();
                     ringSession = 0;
                     link.Start();
                 }
@@ -409,7 +413,20 @@ namespace Astra.Unity
             integration = current;
             extraCameras.Clear(); // the cameras it wanted her in are its own answer
             views.Clear();
-            if (current != null) log.LogInfo($"integration '{current.Id}' for {current.Game} is in charge");
+            if (current != null) log.LogInfo($"integration '{current.Id}' for {current.Game} is in charge"
+                + (link != null && link.Ready ? "; Astra hears of it when it next connects" : ""));
+            TellLink();
+        }
+
+        /// <summary>Who this game is, for the link's NEXT hello (the link reads these at every
+        /// (re)connect): the integration in charge — or none, once it faulted — and its declarations.
+        /// Main thread (it reads Unity's product name).</summary>
+        void TellLink()
+        {
+            declared = integration?.Declared;
+            if (link == null) return;
+            link.Game = integration?.Game ?? Application.productName;
+            link.Integration = integration?.Id;
         }
 
         static bool Finite(Vector3 v) =>
@@ -443,6 +460,7 @@ namespace Astra.Unity
                 log.LogError($"the integration '{integration?.Id}' failed ({what}) and is switched off; Astra goes on with her defaults: {e}");
                 dropped = integration;
                 integration = null;
+                TellLink();
                 extraCameras.Clear(); // the cameras it wanted her in were its answer, gone with it
                 views.Clear();
                 return fallback();

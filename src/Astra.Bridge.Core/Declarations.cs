@@ -57,16 +57,20 @@ namespace Astra.Bridge
     /// <summary>
     /// The raw parameters a game DECLARES — what it sends, so Astra can show them to the player before
     /// the game ever ran and offer to make her react to them (<c>hello.params</c>). In order, each name
-    /// once, at most <see cref="MaxCount"/>, the foundation's own measured ones first.
+    /// once, at most <see cref="MaxCount"/> in all, the foundation's own measured ones first. The engine
+    /// keeps the list a hello carried and replaces it with the next hello's, so every declaration
+    /// belongs before the first hello: <see cref="Said"/> tells a late one apart.
     /// </summary>
     public sealed class ParamDeclarations
     {
-        /// <summary>The most parameters one hello declares.</summary>
+        /// <summary>The most parameters one hello declares, the measured ones included (the engine's
+        /// own bound): an integration beside the foundation's two declares at most 62.</summary>
         public const int MaxCount = 64;
 
         readonly List<ParamDecl> list = new List<ParamDecl>();
         readonly int measured;
-        ParamDecl[] snapshot;
+        volatile ParamDecl[] snapshot;
+        volatile bool said;
 
         /// <param name="measured">The parameters the foundation itself sends (<see cref="ParamDecl.Speed"/>,
         /// <see cref="ParamDecl.Airborne"/>): declared first, and names nobody else may declare.</param>
@@ -79,14 +83,18 @@ namespace Astra.Bridge
 
         public int Count => list.Count;
 
+        /// <summary>Has a hello carried these declarations (<see cref="ForHello"/>)? Then one declared
+        /// now reaches Astra only with the next connection's hello.</summary>
+        public bool Said => said;
+
         /// <summary>
         /// Declare a parameter this game sends. Declaring the same name with the same type again does
-        /// nothing.
+        /// nothing. True when it was added (false: it was there).
         /// </summary>
         /// <exception cref="ArgumentException">The name is not an identifier of at most
         /// <see cref="ParamDecl.MaxName"/> characters, is one the foundation measures itself, was
-        /// declared with the other type, or would be past the <see cref="MaxCount"/>th.</exception>
-        public void Declare(string name, ParamType type)
+        /// declared with the other type, or would be past <see cref="MaxCount"/> in all.</exception>
+        public bool Declare(string name, ParamType type)
         {
             if (!ParamDecl.ValidName(name))
                 throw new ArgumentException($"'{name}' is not a parameter name: a letter or _, then letters, digits or _, at most {ParamDecl.MaxName} characters", nameof(name));
@@ -99,15 +107,24 @@ namespace Astra.Bridge
                     throw new ArgumentException($"'{name}' is measured by the foundation itself: do not declare or send it", nameof(name));
                 if (list[i].Type != type)
                     throw new ArgumentException($"'{name}' is already declared as {list[i].TypeWord}", nameof(name));
-                return;
+                return false;
             }
             if (list.Count >= MaxCount)
-                throw new ArgumentException($"a game declares at most {MaxCount} parameters", nameof(name));
+                throw new ArgumentException($"a game declares at most {MaxCount} parameters in all: {MaxCount - measured} beside the foundation's {measured}", nameof(name));
             list.Add(new ParamDecl(name, type));
             snapshot = list.ToArray();
+            return true;
         }
 
         /// <summary>The declarations as they stand: a copy, safe to hand to another thread.</summary>
         public ParamDecl[] ToArray() => (ParamDecl[])snapshot.Clone();
+
+        /// <summary>The declarations for a hello, from any thread: marks them <see cref="Said"/> first,
+        /// so a declaration racing this one is either in the list or reported as late.</summary>
+        public ParamDecl[] ForHello()
+        {
+            said = true;
+            return ToArray();
+        }
     }
 }

@@ -78,6 +78,9 @@ namespace Astra.Sdk
 
         /// <summary>For the foundation: told when an integration registers (old, new).</summary>
         internal static event Action<GameIntegration, GameIntegration> Registered;
+
+        /// <summary>For the foundation: where the SDK's own warnings go (the plugin's log).</summary>
+        internal static Action<string> Warn;
     }
 
     /// <summary>One game's integration: what it changes about Astra in that game.</summary>
@@ -192,12 +195,18 @@ namespace Astra.Sdk
         /// starting it, and can make her react to it. Declare every parameter you send, once, where you
         /// register. <c>speed</c> and <c>airborne</c> are the foundation's own, declared for you.
         /// </summary>
+        /// <remarks>Declared after Astra was told this game's parameters (its first connection), it is
+        /// said only at the next connection, and Astra keeps the shorter list until then: the foundation
+        /// warns in the log.</remarks>
         /// <exception cref="ArgumentException">The name is not a parameter name (a letter or <c>_</c>,
         /// then letters, digits or <c>_</c>, at most 32 characters), is one of the foundation's own, was
-        /// declared with the other type, or is past the 64th.</exception>
+        /// declared with the other type, or would be past 64 in all (62 beside the foundation's
+        /// two).</exception>
         public GameIntegration DeclareParam(string name, ParamType type)
         {
-            Declared.Declare(name, type);
+            if (Declared.Declare(name, type) && Declared.Said)
+                AstraSdk.Warn?.Invoke($"integration '{Id}' declared the parameter '{name}' after Astra was told this game's parameters: "
+                    + "Astra hears of it only when it next connects, and keeps the shorter list until then. Declare every parameter where you register.");
             return this;
         }
     }

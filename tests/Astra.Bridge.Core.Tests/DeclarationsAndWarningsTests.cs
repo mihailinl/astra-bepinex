@@ -69,9 +69,9 @@ public class DeclarationsAndWarningsTests
     public void declarations_keep_the_measured_ones_first_and_each_name_once()
     {
         var d = new ParamDeclarations(ParamDecl.Speed, ParamDecl.Airborne);
-        d.Declare("climbing", ParamType.Bool);
-        d.Declare("depth", ParamType.Float);
-        d.Declare("climbing", ParamType.Bool); // again, the same: nothing
+        Assert.True(d.Declare("climbing", ParamType.Bool));
+        Assert.True(d.Declare("depth", ParamType.Float));
+        Assert.False(d.Declare("climbing", ParamType.Bool)); // again, the same: nothing
         Assert.Equal(new[] { "speed", "airborne", "climbing", "depth" }, d.ToArray().Select(p => p.Name));
         Assert.Equal(new[] { ParamType.Float, ParamType.Bool, ParamType.Bool, ParamType.Float }, d.ToArray().Select(p => p.Type));
     }
@@ -90,6 +90,28 @@ public class DeclarationsAndWarningsTests
         for (int i = d.Count; i < ParamDeclarations.MaxCount; i++) d.Declare("p" + i, ParamType.Float);
         Assert.Throws<ArgumentException>(() => d.Declare("one_too_many", ParamType.Float));
         Assert.Equal(ParamDeclarations.MaxCount, d.Count);
+    }
+
+    /// <summary>F6: 64 in all is the engine's bound, so 62 beside the foundation's two, and the
+    /// refusal says so.</summary>
+    [Fact]
+    public void an_integration_declares_62_beside_the_measured_two()
+    {
+        var d = new ParamDeclarations(ParamDecl.Speed, ParamDecl.Airborne);
+        for (int i = 0; i < 62; i++) d.Declare("p" + i, ParamType.Bool);
+        var e = Assert.Throws<ArgumentException>(() => d.Declare("p62", ParamType.Bool));
+        Assert.Contains("62 beside the foundation's 2", e.Message);
+    }
+
+    [Fact]
+    public void declarations_are_said_once_a_hello_took_them()
+    {
+        var d = new ParamDeclarations(ParamDecl.Speed);
+        d.Declare("a", ParamType.Bool);
+        Assert.False(d.Said);
+        var forHello = d.ForHello();
+        Assert.True(d.Said);
+        Assert.Equal(new[] { "speed", "a" }, forHello.Select(p => p.Name));
     }
 
     /// <summary>A copy: what the link thread holds never changes under it.</summary>
@@ -118,6 +140,17 @@ public class DeclarationsAndWarningsTests
             log.Admit("clip_refused", "c.vrma", "capture is off"));
         Assert.Equal("Astra warns (new_code): 'x'", log.Admit("new_code", "x", ""));
         Assert.Equal("Astra warns (unknown): 'y'", log.Admit(null, "y", null));
+    }
+
+    /// <summary>F7: what the foundation measures in every game is no warning anybody can act on.</summary>
+    [Fact]
+    public void the_measured_parameters_are_never_warned_about()
+    {
+        var log = new WarnLog(ParamDecl.Speed.Name, ParamDecl.Airborne.Name);
+        Assert.Null(log.Admit("param_undeclared", "speed", null));
+        Assert.Null(log.Admit("param_undeclared", "airborne", null));
+        Assert.NotNull(log.Admit("param_undeclared", "climbing", null));
+        Assert.NotNull(log.Admit("state_unknown", "speed", null)); // only the parameter warning is quiet
     }
 
     [Fact]

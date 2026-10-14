@@ -17,7 +17,16 @@ namespace Astra.Bridge
         public const int Max = 32;
 
         readonly HashSet<string> said = new HashSet<string>();
+        readonly HashSet<string> quiet;
         bool full;
+
+        /// <param name="quietParams">Parameters a <c>param_undeclared</c> is never printed for: the ones
+        /// the foundation measures and sends in every game (<see cref="ParamDecl.Speed"/>,
+        /// <see cref="ParamDecl.Airborne"/>), which nobody reading the console can act on.</param>
+        public WarnLog(params string[] quietParams)
+        {
+            quiet = new HashSet<string>(quietParams ?? new string[0]);
+        }
 
         /// <summary>The line to log for one <c>warn</c>, or null when it was logged already (or the
         /// budget is spent and that was said). The engine's words are a game's own text echoed back:
@@ -28,6 +37,7 @@ namespace Astra.Bridge
             name = Printable(name, 64);
             why = Printable(why, 200);
             if (code.Length == 0) code = "unknown";
+            if (code == "param_undeclared" && quiet.Contains(name)) return null;
             if (said.Contains(code + "\n" + name)) return null;
             if (said.Count >= Max)
             {

@@ -424,9 +424,12 @@ var astra = AstraSdk.Register("astra.mygame", "My Game")
 The foundation puts the list in its `hello` to the engine (`params`, [`PROTOCOL.md`](PROTOCOL.md)),
 after the two it measures itself (`speed`, `airborne`, declared for you). Astra keeps it for your
 integration id, so a player sees what your game sends before ever starting it, and can make her react
-to it. `DeclareParam` throws an `ArgumentException` for a name that is not an identifier of at most
-32 characters, for `speed` or `airborne`, for a name declared again with the other type, and past the
-64th; declaring the same parameter twice does nothing. `ParamType` is `Bool` or `Float`, the two
+to it. Each connection's hello replaces the list Astra keeps, so **declare everything where you
+register**: a parameter declared after the game first connected reaches Astra only when it next
+connects, and the foundation warns about it in the log. `DeclareParam` throws an `ArgumentException`
+for a name that is not an identifier of at most 32 characters, for `speed` or `airborne`, for a name
+declared again with the other type, and past 62 of yours (the engine takes 64 in all, the
+foundation's two included); declaring the same parameter twice does nothing. `ParamType` is `Bool` or `Float`, the two
 types an animation set knows. `DeclareParam` is new in SDK 0.7.0: set `<AstraVersion>` to 0.7.0 or
 newer once that release is out (step 9 says how); against 0.6.1 your README is the only
 declaration.
@@ -440,7 +443,8 @@ and the foundation prints each one once, as a warning in `BepInEx/LogOutput.log`
 ```
 
 That warning is normal for a fact no pack uses yet. It tells you of a typo too: the parameter you
-meant to send is spelled differently.
+meant to send is spelled differently. (There is none for `speed` and `airborne`: the foundation sends
+them in every game, and a set that does not use them is no news to you.)
 
 ## 7. Test it in the game
 

@@ -43,7 +43,9 @@ namespace Astra.Bridge
         int session;
         string lastState;
         readonly HashSet<string> loggedErrors = new HashSet<string>(); // per CONNECTION: cleared on every new one
-        readonly WarnLog warnings = new WarnLog(); // for the link's whole life: a reconnect does not repeat them
+        // For the link's whole life (a reconnect does not repeat them); never about the parameters the
+        // foundation itself measures and sends in every game.
+        readonly WarnLog warnings = new WarnLog(ParamDecl.Speed.Name, ParamDecl.Airborne.Name);
 
         /// <summary>What this side understands beyond the first contract, said in every hello
         /// (<c>hello.caps</c>): the engine's <c>warn</c> messages, logged through <see cref="Warn"/>.</summary>
@@ -121,10 +123,11 @@ namespace Astra.Bridge
         public string Integration { get; set; }
 
         /// <summary>The raw parameters this game sends (<c>hello.params</c>), which the engine keeps per
-        /// <see cref="Integration"/> so Astra can show them to the player; null = not said. Read fresh
-        /// on every (re)connect, and sent unless the engine's last hello said it does not take them.
-        /// Hand it a copy (<see cref="ParamDeclarations.ToArray"/>): this thread reads it.</summary>
-        public ParamDecl[] Params { get; set; }
+        /// <see cref="Integration"/> (replacing what an earlier hello said) so Astra can show them to the
+        /// player. ASKED on the link's own thread at every hello, so a (re)connect says the list as it
+        /// is then (<see cref="ParamDeclarations.ForHello"/>); null, or null from it = not said. Sent
+        /// unless the engine's last hello said it does not take them.</summary>
+        public Func<ParamDecl[]> Params { get; set; }
 
         /// <summary>Bumped on every engine hello: a new session — map the ring again.</summary>
         public int Session => Volatile.Read(ref session);
@@ -191,7 +194,7 @@ namespace Astra.Bridge
                     LastError = null;
                     // hello.params goes to an engine that takes it, or whose caps are not known yet (an
                     // older engine ignores it): like the shadow word, never to one that said otherwise.
-                    var declared = Supports("hello.params") ? Params : null;
+                    var declared = Supports("hello.params") ? Params?.Invoke() : null;
                     if (!socket.SendText(Messages.Hello(client, token, EffectiveShadow(), Game, Foundation, Integration, Crop, declared, OurCaps)))
                         throw new IOException("closed before hello");
                     State($"connected to Astra on {host}:{port}");
