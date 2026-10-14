@@ -103,7 +103,7 @@ the build at folders that have them. These folders are only read; never commit t
 | the URP 17 adapter | environment `UrpRefDir` | a Unity 6 URP game's `<Game>_Data/Managed`, or a Unity 6 URP project's `Library/ScriptAssemblies`. The default is the testbed's `unity/AstraTestbed/Library/ScriptAssemblies`, which exists once you open or build the testbed. | **the build fails** (a fresh clone has no testbed `Library/`) |
 | the URP 14 adapter | `URP14_REF_DIR` | a Unity 2022.3 URP game's `<Game>_Data/Managed` | a warning; the foundation draws such games over the finished frame |
 | the HDRP adapter | `HDRP_REF_DIR` | an HDRP game's `<Game>_Data/Managed`, or an HDRP project's `Library/ScriptAssemblies` | a warning; HDRP games get no depth test |
-| the IL2CPP plugin | the first argument of `pack.sh` (or environment `Il2CppInteropDir`) | a `BepInEx/interop` folder that BepInEx 6 generated for an IL2CPP game. It must keep every Unity type the foundation names: Schedule I's works; MiSide's lacks `SphericalHarmonicsL2` and does not compile. The default is the testbed's `unity/AstraTestbed/Build/il2cpp/BepInEx/interop`. | the build fails |
+| the IL2CPP plugin | the first argument of `pack.sh` (or environment `Il2CppInteropDir`) | a `BepInEx/interop` folder that BepInEx 6 generated for an IL2CPP game. It must keep every Unity type the foundation names: Schedule I's works; MiSide's lacks `SphericalHarmonicsL2` and does not compile. The default is the testbed's `unity/AstraTestbed/Build/il2cpp/BepInEx/interop`, which exists once BepInEx 6 has started the testbed's IL2CPP build. | the build fails |
 
 For example, with the games the maintainers use (Content Warning is Unity 6 URP, the EXTERMINATION
 SHIP demo is Unity 2022.3 URP, Lethal Company is HDRP, and the interop is Schedule I's from Astra's
@@ -248,7 +248,7 @@ a method that is allowed to fail:
 `src/Astra.Unity/Sh.cs` is the pattern: light probes, which MiSide's build removed. When you call a
 Unity API the foundation did not use before, run the audit against at least one IL2CPP game and
 fence what it reports. `check-game-members` has two more modes, `dump` and `check`, for integration
-authors ([`docs/WRITE-AN-INTEGRATION.md`](docs/WRITE-AN-INTEGRATION.md#find-your-way-around-the-game)).
+authors ([`docs/WRITE-AN-INTEGRATION.md`](docs/WRITE-AN-INTEGRATION.md#4-find-your-way-around-the-game)).
 
 ## Reporting a game that does not work
 

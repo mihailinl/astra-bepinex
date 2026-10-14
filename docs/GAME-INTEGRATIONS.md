@@ -5,6 +5,10 @@ integrations that the community builds on it, and the Astra marketplace that ins
 both. Written 2026-10-06 after the first live run in PEAK. It takes in the answers of the plugins
 server agent, the client agent and minice-44, who own the marketplace, the client and identity.
 
+This page is the design and its record. **To write an integration, follow
+[`WRITE-AN-INTEGRATION.md`](WRITE-AN-INTEGRATION.md)**; to work on the foundation, read
+[`CONTRIBUTING.md`](../CONTRIBUTING.md).
+
 ## 1. Four layers, four owners
 
 | layer | what it is | where | who builds it |
@@ -45,7 +49,9 @@ The SDK's type names (`PlayerInfo`, `FrameContext`, `GameIntegration`, `Integrat
 `IBrain`) are deliberately not `Player` or `Frame`: games declare those in the GLOBAL namespace, and a
 global type shadows a `using` (PEAK's `Player` did).
 
-The extension points, one interface each, every one with a default that already works:
+The extension points, one interface each, every one with a default that already works (the
+working reference, with every type and member and a whole example, is
+[`WRITE-AN-INTEGRATION.md`](WRITE-AN-INTEGRATION.md) §5):
 
 | point | default | an integration replaces it with |
 |---|---|---|
@@ -82,8 +88,9 @@ both.
   without being rebuilt or republished. That is the "update the foundation, every game benefits"
   property.
 - **Template:** `dotnet new astra-integration --game "PEAK" --runtime mono` scaffolds the csproj, the
-  plugin class, a profile, the item manifest and a CI workflow that builds and packages a release.
-  A modder writes behaviour only.
+  plugin class and the item manifest (`astra-item.toml`). It does not yet make the release manifest
+  (`astra-gi.toml`) or a CI workflow: the published integrations' are copied instead
+  ([`WRITE-AN-INTEGRATION.md`](WRITE-AN-INTEGRATION.md) §8–9).
 - **Installed-version marker:** the foundation writes `BepInEx/plugins/Astra/astra-item.json`
   (`id`, `version`, `runtime`, `loader`, `protocol`), and so does each integration in its own folder.
   The client reads these to see what is installed.

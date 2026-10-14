@@ -95,19 +95,9 @@ change the DEFAULTS; a value you change here always wins:
 ## A game where she should do better → an integration
 
 The foundation alone makes Astra work in any Unity game. A **game integration** makes her better in
-ONE game: who the player really is, where she stands and how she gets there, her size in that world,
-raw facts for her animations. It is a small separate BepInEx plugin, usually in its own repository
-(the first one is `astra-peak`), and it builds on the foundation's SDK:
-
-```bash
-tools/pack.sh                                   # until the packages are on nuget.org: artifacts/nuget
-dotnet new install artifacts/nuget/Astra.Unity.Templates.0.2.0.nupkg
-dotnet new astra-integration -n AstraMyGame --game "My Game" --id astra.mygame --runtime mono
-```
-
-(The template's project restores `Astra.Unity.Sdk` from nuget.org; until it is published there, add
-`artifacts/nuget` as a package source, e.g. in a `GameDir.props.user`:
-`<RestoreAdditionalProjectSources>…/astra-bepinex/artifacts/nuget</RestoreAdditionalProjectSources>`.)
+ONE game: who the player really is, the camera, where she stands and how she gets there, her size in
+that world, raw facts for her animations. It is a small separate BepInEx plugin in its own
+repository, built on the foundation's SDK (`Astra.Unity.Sdk`):
 
 ```csharp
 var astra = AstraSdk.Register("astra.mygame", "My Game");
@@ -115,47 +105,45 @@ astra.Defaults.MatchPlayerHeight = 0.95f;           // as tall as 95% of the pla
 astra.UsePlayer(cam => new PlayerInfo { Feet = …, Forward = …, Root = …, Height = … });
 astra.UseBrain(new MyBrain());                       // where she stands; call f.Default for ordinary frames
 astra.OnFrame(f => f.Params.Set("swimming", …));     // RAW FACTS for her animation set
-astra.Cues.Play("wave");                             // animation by name, on a game event
+astra.Cues.Trigger("player_died");                   // animation by name, on a game event
 ```
 
-The integration references `Astra.Unity.Sdk` **compile-only** and never ships the foundation: the
-foundation is installed once per game and updates by itself, so every integration gets its updates
-without a rebuild. The full design is [`docs/GAME-INTEGRATIONS.md`](docs/GAME-INTEGRATIONS.md);
-`tests/TestbedIntegration` is a working example on the testbed.
+The integration references the SDK **compile-only**: the foundation keeps its own folder
+(`BepInEx/plugins/Astra/`), so a newer foundation needs no rebuild of the integration.
+
+**[Write an integration](docs/WRITE-AN-INTEGRATION.md)** takes you from `dotnet new
+astra-integration` to a GitHub release Astra installs. Four are published:
+[astra-peak](https://github.com/mihailinl/astra-peak),
+[astra-lethal](https://github.com/mihailinl/astra-lethal),
+[astra-content-warning](https://github.com/mihailinl/astra-content-warning) and
+[astra-repo](https://github.com/mihailinl/astra-repo). The design is
+[`docs/GAME-INTEGRATIONS.md`](docs/GAME-INTEGRATIONS.md); `tests/TestbedIntegration` is a working
+example on the testbed.
 
 ## Build
 
 ```bash
-tools/pack.sh [<an IL2CPP game>/BepInEx/interop]   # both foundations, the SDK and template packages → artifacts/
+dotnet build src/Astra.BepInEx5 -c Release         # the Mono foundation: no Unity, no game needed
 dotnet test tests/Astra.Bridge.Core.Tests          # + ASTRA_ENGINE=<engine binary> for end-to-end
+tools/pack.sh [<an IL2CPP game>/BepInEx/interop]   # everything → artifacts/
 ```
 
-The composite shader is a Unity asset bundle, built per Unity line and platform and embedded in the
-plugins: today 2021 (2021.3.35), 2022 and 6000. To rebuild one line's, with that line's editor:
+`tools/pack.sh` compiles the pipeline adapters and the IL2CPP flavour against assemblies that have
+no NuGet package; [`CONTRIBUTING.md`](CONTRIBUTING.md#building-and-testing) says which folders to
+point it at. The composite shader is a Unity asset bundle per Unity line, embedded in the plugins:
+2021, 2022 and 6000 today. A bundle loads in its own line and newer ones, never older, so bundles
+for 2019–2020 are welcome ([how](CONTRIBUTING.md#a-shader-bundle-for-another-unity-line)). An IL2CPP
+game's build strips the engine API the game never uses; check the IL2CPP flavour against a game with
+[the stripping audit](CONTRIBUTING.md#il2cpp-games-the-stripping-audit). `unity/AstraTestbed` is a
+tiny URP game built in code to test both plugins without a real game.
 
-```bash
-tools/build-bundles.sh ~/Unity/Hub/Editor/<version>/Editor/Unity
-```
+## Contributing
 
-A bundle loads in its own Unity line and newer ones, never older: bundles for older lines
-(2019–2020) are welcome as contributions — build the same project with that editor.
-
-An IL2CPP game's build STRIPS every engine type and member it never uses, and a plugin method that
-names a stripped one fails the first time it runs. Check the IL2CPP flavour against a game's
-generated interop (metadata only, nothing runs):
-
-```bash
-dotnet run --project tools/check-game-members -- il2cpp \
-  src/Astra.BepInEx6.IL2CPP/bin/Release/net6.0/Astra.Unity.dll <game profile>/BepInEx/interop
-```
-
-Every reference it lists must be unreachable in that game (the SRP hooks in a Built-in game) or sit
-in a method whose caller catches the failure (`Sh` is the pattern: light probes, which MiSide's
-build removed).
-
-`unity/AstraTestbed` is a tiny URP game built in code (walls, a ramp, stairs, a player that walks,
-runs and jumps, a camera that whips round) to test both plugins without a real game — as a Mono and
-an IL2CPP Linux player (`TestbedBuild.Build`).
+Fixes, shader bundles for more Unity lines, IL2CPP robustness and new integrations are welcome. Read
+[`CONTRIBUTING.md`](CONTRIBUTING.md): the rules (generic fixes here, game-specific ones in an
+integration; never commit game files), how to build and test, and the pull-request checklist. Good
+first issues are the open follow-ups in [`docs/RENDER-CASES.md`](docs/RENDER-CASES.md). A game where
+she does not work: [what to report](CONTRIBUTING.md#reporting-a-game-that-does-not-work).
 
 ## License
 
