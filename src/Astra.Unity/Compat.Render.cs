@@ -279,6 +279,39 @@ namespace Astra.Unity
             return true;
         }
 
+        /// <summary>How many command buffers other than <paramref name="ours"/> (by name, as
+        /// <see cref="KeepFirst"/> tells them apart) <paramref name="cam"/> runs at
+        /// <paramref name="evt"/>; -1 when this build cannot list them.</summary>
+        public static int ForeignBuffers(Camera cam, CameraEvent evt, CommandBuffer ours)
+        {
+            try
+            {
+                return CountOthers(cam, evt, ours.name);
+            }
+            catch (Exception e) when (Stripped(e))
+            {
+                return -1;
+            }
+        }
+
+        /// <summary><see cref="ForeignBuffers"/>' work, in a method of its own so a stripped member
+        /// fails as it compiles, inside the caller's catch.</summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static int CountOthers(Camera cam, CameraEvent evt, string ours)
+        {
+#if IL2CPP
+            Il2CppReferenceArray<CommandBuffer> list = cam.GetCommandBuffers(evt);
+            int n = list == null ? 0 : list.Length;
+#else
+            var list = cam.GetCommandBuffers(evt);
+            int n = list == null ? 0 : list.Length;
+#endif
+            int others = 0;
+            for (int i = 0; i < n; i++)
+                if (list[i] != null && list[i].name != ours) others++;
+            return others;
+        }
+
         public static void UnhookAll()
         {
             foreach (var u in unhook) TryUndo(u);

@@ -234,7 +234,7 @@ namespace Astra.Unity
             log.LogInfo($"depth: {state}: " + (compositor.DepthTested ? "walls hide her" : "she is drawn over everything"));
         }
         /// <summary>The Built-in pipeline: send at pre-cull, then set up what the camera's own
-        /// command buffer draws inside its render, right before its transparent objects — or after its image
+        /// command buffer draws inside its render, before or after its transparent objects — or after its image
         /// effects (Picture.BeforePostProcessing off) — the picture newest by then.</summary>
         void OnBuiltInPreCull(Camera cam)
         {

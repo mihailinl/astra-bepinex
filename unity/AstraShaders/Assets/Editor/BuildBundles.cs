@@ -77,7 +77,8 @@ public static class BuildBundles
             }
         }
 #else
-        // This line cannot compile one pass for one API from a script: the shader's own messages.
+        // This line cannot compile one pass for one API from a script: the shader's own messages (for
+        // the editor's API alone). tools/check-bundles.py reads the BUILT bundles for every API.
         if (ShaderUtil.ShaderHasError(shader))
             foreach (var m in ShaderUtil.GetShaderMessages(shader)) errors.Add($"{m.platform}: {m.message}");
 #endif

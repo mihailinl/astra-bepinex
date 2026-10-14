@@ -3,6 +3,7 @@ using System;
 using System.Collections;
 using System.IO;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 /// <summary>
 /// A tiny "game" to test the plugins on, built entirely in code (no assets to keep in sync), shared by
@@ -20,8 +21,12 @@ using UnityEngine;
 /// The shots at 2, 6, 10 and 14 s show her in each.
 /// <c>-astraScene glass</c> is the TRANSPARENTS test: the player stands still, a fixed camera looks
 /// at her through a pane of tinted glass over the right half of the picture and a drift of sparks in
-/// front of her, with a dense cloud of other sparks just behind her (between her and the player). The
-/// glass and the near sparks must lie over her; the cloud must be hidden where she stands.
+/// front of her, with a bright haze behind her head and a dense cloud of other sparks just behind her
+/// (between her and the player). The glass and the near sparks must lie over her; the haze and the
+/// cloud must be hidden where she stands — her soft edge (hair tips) shows how they meet her.
+/// <c>-astraForeignBuffer</c> (with the glass scene): the camera also runs a command buffer of the
+/// "game's" own before its transparent objects (Built-in BeforeForwardAlpha), painting a red stain
+/// over her legs, the way ULTRAKILL composites its blood there.
 /// </para>
 /// </summary>
 public sealed class Testbed : MonoBehaviour
@@ -39,7 +44,7 @@ public sealed class Testbed : MonoBehaviour
     float quitAt = -1, nextShot = 2, shotEvery = 4;
     int shotN;
     RenderTexture offscreen;
-    bool dark, glass;
+    bool dark, glass, foreign;
     Light lamp, torch;
     Light[] party;
 
@@ -58,6 +63,7 @@ public sealed class Testbed : MonoBehaviour
         if (shots != null) Directory.CreateDirectory(shots);
         Application.targetFrameRate = 60;
         BuildWorld();
+        foreign = Array.IndexOf(args, "-astraForeignBuffer") >= 0;
         if (dark) BuildDarkRoom();
         if (glass) BuildGlass();
         if (Array.IndexOf(args, "-astraOffscreen") >= 0 || Application.isBatchMode)
@@ -162,18 +168,45 @@ public sealed class Testbed : MonoBehaviour
         var look = Quaternion.LookRotation(GlassLook - GlassEye);
         // A pane 1 m in front of the camera, over the right half of the picture: its edge runs
         // down the middle of her.
-        var pane = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        pane.name = "Glass pane";
-        UnityEngine.Object.Destroy(pane.GetComponent<Collider>());
-        var quad = UnityEngine.Object.Instantiate(pane.GetComponent<MeshFilter>().sharedMesh);
-        quad.colors = new[] { Color.white, Color.white, Color.white, Color.white };
-        pane.GetComponent<MeshFilter>().sharedMesh = quad;
-        pane.transform.SetPositionAndRotation(GlassEye + look * new Vector3(0.6f, 0, 1f), look);
-        pane.transform.localScale = new Vector3(1.2f, 1.5f, 1);
-        pane.GetComponent<Renderer>().sharedMaterial = Transparent(new Color(0.25f, 0.55f, 0.9f, 0.55f), null);
+        Pane("Glass pane", GlassEye + look * new Vector3(0.6f, 0, 1f), look, new Vector2(1.2f, 1.5f), new Color(0.25f, 0.55f, 0.9f, 0.55f));
+        // A bright haze a third of a metre behind her head and shoulders.
+        Pane("Haze", new Vector3(0.05f, 1.3f, -1.0f), look, new Vector2(1.1f, 0.6f), new Color(1f, 0.95f, 0.8f, 0.8f));
+        if (foreign)
+        {
+            // The "game's" own buffer before the transparents: a red stain over her legs.
+            var stain = new CommandBuffer { name = "Testbed blood" };
+            stain.DrawMesh(WhiteQuad, Matrix4x4.TRS(GlassEye + look * new Vector3(-0.2f, -0.55f, 2.2f), look, new Vector3(0.6f, 0.35f, 1)),
+                Transparent(new Color(0.8f, 0.05f, 0.05f, 0.6f), null));
+            cam.AddCommandBuffer(CameraEvent.BeforeForwardAlpha, stain);
+        }
         // Sparks drifting between the camera and her, and a dense cloud of them half a metre behind her.
         Sparks("Near sparks", GlassEye + look * new Vector3(-0.2f, -0.2f, 1.7f), look, new Vector3(1.2f, 1.2f, 0.2f), new Color(1f, 0.55f, 0.1f, 0.9f), 0.07f, 40);
         Sparks("Far sparks", new Vector3(0, 1.0f, -0.8f), look, new Vector3(3f, 2f, 0.1f), new Color(0.3f, 1f, 0.35f, 0.9f), 0.2f, 600);
+    }
+
+    static Mesh whiteQuad;
+
+    /// <summary>Unity's quad with white vertex colours (a sprite shader multiplies by them).</summary>
+    static Mesh WhiteQuad
+    {
+        get
+        {
+            if (whiteQuad != null) return whiteQuad;
+            var g = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            whiteQuad = UnityEngine.Object.Instantiate(g.GetComponent<MeshFilter>().sharedMesh);
+            whiteQuad.colors = new[] { Color.white, Color.white, Color.white, Color.white };
+            UnityEngine.Object.Destroy(g);
+            return whiteQuad;
+        }
+    }
+
+    static void Pane(string name, Vector3 at, Quaternion facing, Vector2 size, Color c)
+    {
+        var g = new GameObject(name);
+        g.AddComponent<MeshFilter>().sharedMesh = WhiteQuad;
+        g.AddComponent<MeshRenderer>().sharedMaterial = Transparent(c, null);
+        g.transform.SetPositionAndRotation(at, facing);
+        g.transform.localScale = new Vector3(size.x, size.y, 1);
     }
 
     void Sparks(string name, Vector3 at, Quaternion facing, Vector3 box, Color c, float size, float rate)

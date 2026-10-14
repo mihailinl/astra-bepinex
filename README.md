@@ -93,6 +93,7 @@ change the DEFAULTS; a value you change here always wins:
 | Picture | `ColourSpace` | `auto` | `linear`/`gamma` if she looks too dark or washed out |
 | Picture | `MaxHeight` | 1080 | her picture's resolution (the engine's maximum; with an engine that crops — 0.2.1+ — only her rectangle of it is copied) |
 | Picture | `BeforePostProcessing` | true | URP games on Unity 2022–2023: draw her before the game's post-processing, so its look (grading, pixelation, dithering) is on her too |
+| Picture | `BeforeTransparents` | `auto` | with BeforePostProcessing: `before` = drawn before the game's transparent objects (particles, glass, water in front of her cover her), `after` = over all of them (0.6.1); `auto` = before, unless a Built-in game runs its own effects there |
 | Picture | `SendLight` | `true` | light her with the game's sun |
 | Connection | `Port` / `Token` / `RingPath` | 25600 / — / auto | only if you changed Astra's |
 
