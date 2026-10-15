@@ -69,6 +69,11 @@ namespace Astra.Bridge
         /// called on the link's own thread; null = through <see cref="Log"/>.</summary>
         public Action<string> Warn;
 
+        /// <summary>Every engine <c>warn</c> as it arrives — its <c>code</c>, <c>name</c> and <c>why</c>
+        /// (null when absent), before the log's once-only filter — for a part that acts on one (the
+        /// capture removes a file the engine refused). Called on the link's own thread.</summary>
+        public Action<string, string, string> Warned;
+
         /// <param name="client">Your mod's name, shown in Astra's log.</param>
         /// <param name="port">The engine's bridge port.</param>
         /// <param name="token">The engine's <c>WGPU_BRIDGE_TOKEN</c>, when the user set one.</param>
@@ -258,6 +263,7 @@ namespace Astra.Bridge
             m.TryGetValue("t", out var t);
             if ((t as string) == "warn")
             {
+                Warned?.Invoke(Text(m, "code"), Text(m, "name"), Text(m, "why"));
                 string line = warnings.Admit(Text(m, "code"), Text(m, "name"), Text(m, "why"));
                 if (line != null) (Warn ?? Log)?.Invoke(line);
                 return;

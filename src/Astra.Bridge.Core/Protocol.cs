@@ -57,6 +57,20 @@ namespace Astra.Bridge
 
         public void Clear() => entries.Clear();
 
+        /// <summary>The value of the true/false parameter <paramref name="name"/> set this frame; false
+        /// when it is not set, or set as a number or back to its default.</summary>
+        public bool TryGetFlag(string name, out bool value)
+        {
+            foreach (var e in entries)
+            {
+                if (e.Name != name) continue;
+                value = e.Kind == Kind.Flag && e.Value != 0;
+                return e.Kind == Kind.Flag;
+            }
+            value = false;
+            return false;
+        }
+
         /// <summary>Copy every parameter of <paramref name="other"/> into this set (its value wins).</summary>
         public void MergeFrom(ParamSet other)
         {
@@ -348,6 +362,20 @@ namespace Astra.Bridge
         /// <summary>Hand her back to her graph's default state.</summary>
         public static string Resume() => End(Begin("resume"));
 
+        /// <summary>
+        /// <c>clip_ready</c>: a move captured from the game, written into the capture inbox the hello
+        /// reply named (<see cref="HelloReply.Inbox"/>) as <paramref name="file"/> — its bare name — to
+        /// be filed as <c>captured-&lt;name&gt;</c>, a move for the parameter <paramref name="forParam"/>.
+        /// Null (with <see cref="Rejection"/>) for a file name or a name the engine refuses.
+        /// </summary>
+        public static string ClipReady(string file, string name, string forParam)
+        {
+            if (!Capture.CaptureRecorder.ValidFileName(file)) return Reject($"'{file}' is not a bare .vrma file name the engine takes");
+            if (!Capture.CaptureRecorder.ValidName(name)) return Reject($"'{name}' is not a clip name the engine takes");
+            if (!Capture.CaptureRecorder.ValidName(forParam)) return Reject($"'{forParam}' is not a parameter name the engine takes");
+            return End(Begin("clip_ready").Str("file", file).Str("name", name).Str("for", forParam));
+        }
+
         /// <summary>The light of the game's world around her; both parts null hands her own light back.</summary>
         public static string Light(Sun? sun, Vec3? ambient) => Light(sun, ambient, null, null);
 
@@ -550,6 +578,11 @@ namespace Astra.Bridge
         /// <c>CAPS</c>); null = an engine from before capability negotiation.</summary>
         public List<string> Caps;
 
+        /// <summary>The capture inbox (PROTOCOL.md, <c>clip_ready</c>): the folder a captured
+        /// <c>.vrma</c> goes into, as the ENGINE names it. Present only while the player has capture
+        /// switched on for the integration this game's hello named; null = do not capture.</summary>
+        public string Inbox;
+
         /// <summary>Is <paramref name="cap"/> one of <paramref name="caps"/>? Null <paramref name="caps"/>
         /// means an engine from before capability negotiation: taken for "supports everything a
         /// foundation without this check already sent", never a refusal.</summary>
@@ -569,6 +602,7 @@ namespace Astra.Bridge
                 MaxHeight = Int(m, "maxH"),
                 Views = Int(m, "views"),
                 Caps = m.TryGetValue("caps", out var caps) ? caps as List<string> : null,
+                Inbox = m.TryGetValue("inbox", out var inbox) && inbox is string dir && dir.Length > 0 ? dir : null,
             };
         }
 
