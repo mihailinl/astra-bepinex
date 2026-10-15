@@ -34,6 +34,11 @@ HDRP=${HDRP_REF_DIR:-}
 [ -n "$HDRP" ] || HDRP=unity/AstraTestbedHdrp/Library/ScriptAssemblies
 INTEROP=${1:-${IL2CPP_INTEROP_DIR:-${Il2CppInteropDir:-}}}
 [ -n "$INTEROP" ] || INTEROP=unity/AstraTestbed/Build/il2cpp/BepInEx/interop
+# Every folder absolute: they reach MSBuild as -p: properties, and MSBuild resolves a relative path
+# against the PROJECT's directory (src/Astra.Urp17/…), not this repo root — so the testbed default
+# above silently failed its Exists() check there (seen cutting v0.7.0).
+abs() { case "$1" in ""|/*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
+URP17=$(abs "$URP17"); URP14=$(abs "$URP14"); HDRP=$(abs "$HDRP"); INTEROP=$(abs "$INTEROP")
 REQUIRE=" ${ASTRA_PACK_REQUIRE:-} "
 [ "$REQUIRE" = " all " ] && REQUIRE=" urp17 urp14 hdrp il2cpp "
 
