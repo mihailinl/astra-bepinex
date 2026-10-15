@@ -12,6 +12,6 @@
          a plain x.y.z: never a suffix here). A pack that is not a release still gets a prerelease
          PACKAGE version (-dev, -mono-dev: src/Astra.Unity.Sdk, templates/), so a local pack never
          shares an id and a version with a published package in anyone's NuGet cache. -->
-    <Version>0.7.0</Version>
+    <Version>0.8.0</Version>
   </PropertyGroup>
 </Project>
