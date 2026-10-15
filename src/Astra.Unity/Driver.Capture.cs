@@ -52,6 +52,8 @@ namespace Astra.Unity
             public int FailedFor;
             public string FailedWhy;
             public Func<IPoseSampler> Find;
+            /// <summary>When the rig may next be read ahead of a take.</summary>
+            public double NextLook;
         }
 
         /// <summary>The link's <see cref="BridgeLink.Warned"/> (its own thread).</summary>
@@ -100,7 +102,9 @@ namespace Astra.Unity
                         ? "capture: off for this game in Astra; switching it on there starts it at once"
                         : "capture: off for this game in Astra; switching it on there takes effect from the game's next start (this Astra does not tell a running game)");
             }
-            string inbox = ran && connected && link.Supports("capture") ? Reachable(CaptureInbox.Local(link.CaptureInbox)) : null;
+            // The inbox follows the CONNECTION, not the frame: a frame with no camera (a load) must not
+            // cost a take written a moment before it (only the parameter needs the frame to have run).
+            string inbox = connected && link.Supports("capture") ? Reachable(CaptureInbox.Local(link.CaptureInbox)) : null;
             while (refusedClips.TryDequeue(out var file))
                 foreach (var c in capturers) c.Recorder.Refused(file);
             sendToLink ??= json => link != null && link.Send(json);
@@ -111,6 +115,13 @@ namespace Astra.Unity
                 bool want = ran && frame.Params.TryGetFlag(c.Request.Param, out bool on) && on;
                 if (i == 0 && Testing(now, inbox, c)) want = true;
                 c.Recorder.Step(now, inbox, want, c.Find, sendToLink);
+                // Read the rig ahead of the first take (a hierarchy walk and a mesh scan, once per
+                // Animator), not on the frame the player grabs the wall: at most once a second.
+                if (inbox != null && c.Recorder.State == CaptureState.Idle && now >= c.NextLook)
+                {
+                    c.NextLook = now + 1;
+                    c.Find();
+                }
             }
             if (captureTest > 0) ProbeOrder(capturers[0]);
         }

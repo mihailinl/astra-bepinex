@@ -71,6 +71,24 @@ public class CaptureReviewTests : IDisposable
         Assert.Empty(Files());
     }
 
+    /// <summary>S2b, from the engine re-check: a take whose second is taken already (a 48-character
+    /// clip, two takes in one second) takes the NEXT second — never a suffix — so its file name stays
+    /// at 64 characters, all of which even an engine from before <c>capture-live</c> echoes back.</summary>
+    [Fact]
+    public void a_taken_second_is_the_next_one_and_the_name_stays_64()
+    {
+        string clip = new string('c', 48);
+        long now0 = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        for (long s = now0; s < now0 + 3; s++) File.WriteAllText(Path.Combine(inbox, CaptureInbox.FileName(clip, s)), "taken");
+        var r = new CaptureRecorder(clip, "climbing", l => log.Add(l), a => a());
+        Play(r, 2.5, true);
+        Play(r, 0.2, false);
+        var mine = Files().Except(Enumerable.Range(0, 3).Select(i => CaptureInbox.FileName(clip, now0 + i))).Single();
+        Assert.Equal(64, mine.Length);
+        Assert.Matches("^" + clip + @"-\d{10}\.vrma$", mine);
+        Assert.All(Files(), f => Assert.InRange(f.Length, 1, CaptureInbox.MaxEchoedName));
+    }
+
     /// <summary>S2d: a take of this clip left in the inbox longer than 10 minutes — refused while the
     /// game was gone, never offered — is removed when an inbox next appears; a recent one, another
     /// clip's, a stranger's file and a file in another shape are left alone.</summary>
