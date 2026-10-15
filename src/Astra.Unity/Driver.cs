@@ -220,6 +220,7 @@ namespace Astra.Unity
             });
             // The frame's optional parts, outside its fence: each answers for itself (Feature).
             if (faulted) return;
+            StepCapture(wasLive && main != null); // Driver.Capture.cs
             // Her depth test reads the camera's depth texture; URP renders one only for a camera that
             // asks (or whose pipeline asset says so) — without it she is drawn over everything
             // (Compositor.DepthState says so). Held only while she is drawn into the main camera.
@@ -248,6 +249,7 @@ namespace Astra.Unity
                         string.IsNullOrEmpty(settings.Token.Value) ? null : settings.Token.Value);
                     link.Log = m => log.LogInfo(m);
                     link.Warn = m => log.LogWarning(m);
+                    link.Warned = CaptureWarned; // Driver.Capture.cs: a refused capture is removed
                     // Her shadow here is the game's own, cast by her caster: the engine need not make
                     // her view from the sun (and makes neither when shadows are off).
                     link.Shadow = settings.Shadows.Value ? "caster" : "none";
@@ -617,6 +619,7 @@ namespace Astra.Unity
             Runtime.Connected = false;
             Compat.UnhookAll();
             depth.ReleaseAll();
+            StopCapture();
             link?.Dispose();
             ring?.Dispose();
             compositor?.Dispose();

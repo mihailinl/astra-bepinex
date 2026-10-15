@@ -84,7 +84,7 @@ namespace Astra.Sdk
     }
 
     /// <summary>One game's integration: what it changes about Astra in that game.</summary>
-    public sealed class GameIntegration
+    public sealed partial class GameIntegration
     {
         internal Func<Camera, PlayerInfo?> PlayerLocator;
         internal Func<Camera> CameraLocator;

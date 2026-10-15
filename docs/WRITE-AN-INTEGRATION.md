@@ -38,6 +38,7 @@ Write an integration when the game needs knowledge only code can have:
 | She is too small or too big for this world. | `Defaults.Scale` or `Defaults.MatchPlayerHeight` |
 | Where she stands needs the game's rules: you climb, swim, drive. | `UseBrain` |
 | The game has states her animations could react to (crouching, underwater, afraid). | `OnFrame` with `f.Params`, and `DeclareParam` |
+| The game animates its player doing something she could do too (climbing, dancing). | `CaptureWhile` ([§12](#12-your-own-animations-and-the-games)) |
 | A game event deserves a gesture. | `Cues` |
 | She should show up in mirrors or in-game cameras. | `AlsoDrawInto` (URP games only, for now) |
 | The game's light is unusual (its own day cycle, darker than most). | `UseSun`, `UseLook` |
@@ -596,27 +597,74 @@ The launcher is open source: [astra-game-launcher](https://github.com/mihailinl/
   ([`CONTRIBUTING.md`](../CONTRIBUTING.md#il2cpp-games-the-stripping-audit)).
 - `GameType` works the same way there.
 
-## 12. Coming: your own animations and the game's
+## 12. Your own animations and the game's
 
-Both are built on the engine side and not yet usable from an integration. Do not ship either today.
+**An animation pack for your game (coming: engine side done, launcher pending).** An integration
+will be able to ship an animation pack (an `.astrapack`: a zip of a pack, marked as yours, with an id,
+a version and your game in its `games` list). Your `astra-gi.toml` will place it with a new
+destination, `${astra_pack_inbox}`, which the launcher will resolve to the player's pack inbox for
+your integration. The engine imports it, uses it only while your game holds her, and keeps the
+player's own edits apart from your pack, so your updates never overwrite them. Today the launcher
+does not know `${astra_pack_inbox}`, and it refuses a manifest that names a placeholder it does not
+know. Do not ship one yet.
 
-**An animation pack for your game (engine side done; launcher pending).** An integration will be able
-to ship an animation pack (an `.astrapack`: a zip of a pack, marked as yours, with an id, a version
-and your game in its `games` list). Your `astra-gi.toml` will place it with a new destination,
-`${astra_pack_inbox}`, which the launcher will resolve to the player's pack inbox for your
-integration.
-The engine imports it, uses it only while your game holds her, and keeps the player's own edits
-apart from your pack, so your updates never overwrite them. Today the launcher does not know
-`${astra_pack_inbox}`, and it refuses a manifest that names a placeholder it does not know.
+**Capturing the game's own animation (SDK 0.7.0).** Your game already animates its player climbing,
+swimming, dancing. The foundation can sample that animation while one of your raw facts is true and
+offer it to the player as her move for that fact:
 
-**Capturing the game's own animations (engine side done; foundation and Astra's switch pending).**
-Opt-in, per integration, by the player, and local only. When the player switches capture on for your
-integration, the engine's reply to the game's `hello` names an inbox folder. The integration samples
-the game's own animator into a `.vrma` file there and tells the engine (`clip_ready`). The engine
-copies it into the player's own pack and asks the player whether to use it. A captured clip never
-leaves the player's machine: Astra refuses to export a pack that holds one. The foundation has no
-capture API yet. Never put the game's animations in your repository or your zip: they are the game's
-assets.
+```csharp
+var astra = AstraSdk.Register("astra.mygame", "My Game")
+    .DeclareParam("climbing", ParamType.Bool);
+astra.OnFrame(f => f.Params.Set("climbing", MyPlayer.Climbing));
+// Humanoid Animator (it has an Avatar): Unity knows its bones.
+astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator);
+```
+
+- **The player switches it on, per integration, in Astra** (Parameters › Games, off by default).
+  Only then does the engine's reply to your `hello` name a capture inbox; without one the foundation
+  records nothing at all. You cannot switch it on from your code.
+- While the parameter is true, the player's rig is sampled 30 times a second. When it turns false,
+  the take is written as a `.vrma` (VRM Animation) into the inbox and offered to the engine
+  (`clip_ready`, [`PROTOCOL.md`](PROTOCOL.md)). Astra files it in the player's own pack for your game
+  ("My My Game moves") as `captured-climb`, which replaces nothing she plays, and asks the player:
+  **[Use for climbing]**, **[Keep]** or **[Discard]**.
+- **Bounds.** A take lasts 1.5 to 60 seconds (a shorter one is dropped, a longer one ends at 60), at
+  most three takes are offered per game run, and a take the engine refuses (`clip_refused`, printed
+  once in the log) is removed from the inbox again.
+- **What is captured.** Each humanoid bone's rotation against the rig's REST pose, turned into the
+  VRM normalized pose (the same file a VRM animation tool writes), and the hips' height. Everything is
+  relative to the Animator's transform, so the clip plays in place: the character's travel through
+  the world is the game's, not the clip's. Eyes and jaw are left out: her gaze and her mouth are
+  her own.
+- **The rest pose** is the bind pose of the character's skinned meshes, straightened to a T-pose
+  (arms out, legs down), so a rig bound in an A-pose does not raise her arms by its angle. The log
+  says what it found: `capture: 52 bones of 'Scout' (named by the integration), rest from 3 skinned
+  meshes, straightened to a T-pose (most: leftUpperArm by 38°)`.
+- **A Generic rig** (an Animator with no Avatar: `isHuman` is false) has no humanoid bones Unity
+  knows. Name them, by transform name under the Animator:
+
+  ```csharp
+  static readonly Dictionary<string, string> Bones = new Dictionary<string, string>
+  {
+      ["hips"] = "Hip", ["spine"] = "Mid", ["chest"] = "Torso", ["head"] = "Head",
+      ["leftUpperArm"] = "Arm_L", ["leftLowerArm"] = "Elbow_L", ["leftHand"] = "Hand_L", // …
+  };
+  astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator, Bones);
+  ```
+
+  At least the hips, spine, head, both arms (upper, lower, hand) and both legs (upper, lower, foot);
+  add the chest, neck, shoulders, toes and fingers the rig has. A game that animates one rig and
+  skins a ragdoll COPY of it works too: a bone that is not skinned itself takes the bind pose of the
+  skinned bone with its name.
+- **`CaptureWhile` throws** an `ArgumentException` for a parameter not declared as a bool, a
+  parameter captured already, a clip name that is not 1–64 of `A-Z a-z 0-9 _ . -` (not starting with
+  a dot), and a bone map with a name that is not a VRM humanoid bone or missing a required one.
+- **Test it without reaching the state.** Start the game with `ASTRA_CAPTURE_TEST=5` in its
+  environment: once capture is on and your Animator is there, the first capture records 5 seconds of
+  the player whatever its parameter says. A test aid only; never set it for players.
+- **Local only.** A captured clip is the game's animation: it never leaves the player's machine.
+  Astra refuses to export a pack that holds one. Never put captured clips (or the game's animations
+  any other way) in your repository or your zip.
 
 ## 13. Before you publish
 
