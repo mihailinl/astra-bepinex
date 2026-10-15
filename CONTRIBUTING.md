@@ -363,8 +363,10 @@ her: on screen (0.36, 0.55), 7.9 m from 'Main Camera'; in 10 s drawn 2327 times 
   drawing.
 - `(no picture from Astra)`: the engine sends nothing. Is Astra running, and did the log say
   `connected to Astra on 127.0.0.1:<port>`?
-- `(pictures arrive, none is drawn)`: the drawing is the problem (the pipeline, the camera).
-- `(Astra's picture is empty)`: pictures arrive and are drawn, but none of her is in them.
+- `(pictures arrive, none is drawn)`: pictures with her in them arrive and none is drawn: the drawing
+  is the problem (the pipeline, the camera).
+- `(Astra's picture is empty)`: pictures arrive, but none of her is in them (she is behind you or off
+  screen; an empty picture is not drawn, by design).
 - `(hidden: toggled off, or Astra not connected)`: the toggle key (`F8` by default) or the link.
 
 Logs hold folder paths that may include your user name. Check before you post. Never attach game
