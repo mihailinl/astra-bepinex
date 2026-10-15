@@ -114,16 +114,41 @@ namespace Astra.Unity
                 var c = capturers[i];
                 bool want = ran && frame.Params.TryGetFlag(c.Request.Param, out bool on) && on;
                 if (i == 0 && Testing(now, inbox, c)) want = true;
+                bool sampling = c.Recorder.State == CaptureState.Recording && c.Recorder.Take != null && c.Recorder.Take.Count > 0;
                 c.Recorder.Step(now, inbox, want, c.Find, sendToLink);
+                bool samplingNow = c.Recorder.State == CaptureState.Recording && c.Recorder.Take != null && c.Recorder.Take.Count > 0;
+                if (sampling != samplingNow) HeldSaid(c, ended: sampling);
                 // Read the rig ahead of the first take (a hierarchy walk and a mesh scan, once per
-                // Animator), not on the frame the player grabs the wall: at most once a second.
+                // Animator), not on the frame the player grabs the wall: at most once a second. An
+                // integration's own throw here (its Player() during a load) is said and retried in
+                // ten seconds; only a member the game stripped turns capturing off.
                 if (inbox != null && c.Recorder.State == CaptureState.Idle && now >= c.NextLook)
                 {
                     c.NextLook = now + 1;
-                    c.Find();
+                    try
+                    {
+                        c.Find();
+                    }
+                    catch (Exception e) when (!Compat.Stripped(e))
+                    {
+                        c.NextLook = now + 10;
+                        Once("capture-lookahead:" + e.GetType().Name, $"capture: reading the player's rig ahead of a take failed ({Compat.Why(e)}); tried again later");
+                    }
                 }
             }
             if (captureTest > 0) ProbeOrder(capturers[0]);
+        }
+
+        /// <summary>A take started (its first sample) or ended: what its held-still bones took out.</summary>
+        void HeldSaid(Capturer c, bool ended)
+        {
+            var held = c.Rig?.Held;
+            if (held == null) return;
+            foreach (var h in held)
+            {
+                if (ended) log.LogInfo($"capture: '{h.Name}' was held still in the take: up to {h.Most:0}° of its turn taken out of the {h.Below.Length} bones below it");
+                h.ResetMost();
+            }
         }
 
         /// <summary><paramref name="inbox"/> when this game can reach it (a folder), else null —
@@ -150,7 +175,7 @@ namespace Astra.Unity
             if (c.Rig != null && c.Rig.Alive(animator)) return c.Rig;
             int id = animator.GetInstanceID();
             if (c.FailedWhy != null && c.FailedFor == id) return null;
-            c.Rig = PoseRig.Find(animator, c.Request.Bones, out string why, out string report, out var warnings);
+            c.Rig = PoseRig.Find(animator, c.Request.Bones, c.Request.Still, out string why, out string report, out var warnings);
             if (c.Rig == null)
             {
                 c.FailedFor = id;

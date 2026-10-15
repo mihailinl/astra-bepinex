@@ -71,7 +71,7 @@ public class CaptureRecorderTests : IDisposable
         Play(r, 2, true);
         Assert.Equal(CaptureState.Recording, r.State);
         Assert.InRange(rig.Samples, 50, 53); // 2 s less the 0.3 s lead-in, at 30 per second, from game frames at 60
-        Play(r, 0.1, false);
+        Play(r, 0.3, false);
         Assert.Equal(CaptureState.Idle, r.State);
         var file = Assert.Single(Files());
         Assert.Matches(@"^climb-\d{10}\.vrma$", file);
@@ -93,7 +93,7 @@ public class CaptureRecorderTests : IDisposable
         rig.Local = k => Enumerable.Range(0, rig.Skeleton.Bones.Length)
             .Select(i => i == 0 ? Quat.AngleAxis(40 + k, new Vec3(0, 1, 0)) : Quat.Identity).ToArray();
         Play(r, 2, true);
-        Play(r, 0.1, false);
+        Play(r, 0.3, false);
         var (json, bin) = VrmaWriterTests.ReadGlb(File.ReadAllBytes(Path.Combine(inbox, Assert.Single(Files()))));
         var view = json.GetProperty("bufferViews")[json.GetProperty("accessors")[1].GetProperty("bufferView").GetInt32()];
         int at = view.GetProperty("byteOffset").GetInt32();
@@ -109,7 +109,7 @@ public class CaptureRecorderTests : IDisposable
     {
         var r = Recorder();
         Play(r, 1, true);
-        Play(r, 0.1, false);
+        Play(r, 0.3, false);
         Assert.Empty(Files());
         Assert.Empty(sent);
         Assert.Equal(0, r.Takes);
@@ -127,7 +127,7 @@ public class CaptureRecorderTests : IDisposable
         Assert.Equal(CaptureState.Idle, r.State);
         Play(r, 10, true);
         Assert.Single(sent); // still true: no second take
-        Play(r, 0.1, false);
+        Play(r, 0.3, false);
         Play(r, 2, true);
         Assert.Equal(CaptureState.Recording, r.State);
     }
@@ -182,7 +182,7 @@ public class CaptureRecorderTests : IDisposable
         Play(r, 2, true);
         Play(r, 1, true, inboxNow: null);
         Assert.Equal(CaptureState.Idle, r.State);
-        Play(r, 0.1, false);
+        Play(r, 0.3, false);
         Assert.Empty(Files());
         Assert.Empty(sent);
     }
@@ -195,7 +195,7 @@ public class CaptureRecorderTests : IDisposable
         var r = Recorder();
         Play(r, 2, true);
         connected = false;
-        Play(r, 1 / 60.0, false);
+        Play(r, 0.25, false);
         Assert.Single(Files());
         Play(r, 1 / 60.0, false, inboxNow: null);
         Assert.Empty(Files());
@@ -212,11 +212,11 @@ public class CaptureRecorderTests : IDisposable
         File.WriteAllText(stranger, "not ours");
         var r = Recorder();
         Play(r, 2, true);
-        Play(r, 0.1, false);
+        Play(r, 0.3, false);
         string ours = Files().Single(f => f != "climb-1.vrma");
         r.Refused("climb-1.vrma");
         r.Refused(ours);
-        Play(r, 0.1, false);
+        Play(r, 0.3, false);
         Assert.Equal(new[] { "climb-1.vrma" }, Files());
         Assert.Contains(log, l => l.Contains("did not take") && l.Contains(ours));
     }
@@ -230,7 +230,7 @@ public class CaptureRecorderTests : IDisposable
         rig.Gone = true;
         Play(r, 1, true);
         Assert.Equal(CaptureState.Idle, r.State);
-        Play(r, 0.1, false);
+        Play(r, 0.3, false);
         Assert.Empty(Files());
     }
 

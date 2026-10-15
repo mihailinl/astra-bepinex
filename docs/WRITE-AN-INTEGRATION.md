@@ -631,16 +631,19 @@ astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator);
   capturing without a restart. With an older Astra the switch takes effect from the game's next
   start.
 - While the parameter is true, the player's rig is sampled 30 times a second, from 0.3 s after it
-  turned true: the game's way INTO the state (a jump at the wall, arms flung out) is not the state.
-  When it turns false, the take is written as a `.vrma` (VRM Animation) into the inbox and offered to
+  turned true: the game's way INTO the state (a jump at the wall, arms flung out) is not the state,
+  and a flicker shorter than that is nothing at all (no take, no log line). When it has been false
+  for 0.2 s, the take is written (a one-frame false mid-climb does not split it) as a `.vrma` (VRM Animation) into the inbox and offered to
   the engine (`clip_ready`, [`PROTOCOL.md`](PROTOCOL.md)). Astra files it in the player's own pack
   for your game ("My My Game moves") as `captured-climb`, which replaces nothing she plays, and asks
-  the player: **[Use for climbing]**, **[Keep]** or **[Discard]**.
+  the player: **[Use for climbing]**, **[Keep]** or **[Discard]**. Two captures may share a clip
+  name; each take keeps its own file.
 - **Bounds.** A take lasts 1.5 to 60 seconds after its lead-in (a shorter one is dropped, a longer
   one ends at 60), at most three takes are offered per game run, and the game's offers are at least
   600 ms apart whichever captures they come from. A take the engine refuses (`clip_refused`, printed
   once in the log) is removed from the inbox when the refusal reaches the game; one whose refusal
   never did (the game closed first) is removed when the game next finds the inbox, ten minutes on.
+  A take too short to keep is said at most once in ten seconds.
 - **What is captured.** Each humanoid bone's rotation against the rig's REST pose, turned into the
   VRM normalized pose (the same file a VRM animation tool writes), and where the hips are against the
   FEET (above the lowest foot, across from their midpoint). A take is measured in the character's
@@ -650,7 +653,9 @@ astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator);
   within the take stays. Eyes and jaw are left out: her gaze and her mouth are her own.
 - **The rest pose** is the bind pose of the skinned meshes under the Animator — the one that skins
   the most of the bones you named (a body, not a glove or a hat; a mesh that hangs from a bone
-  last), with a warning in the log where two meshes disagree — and the arms and legs swung straight
+  last), with a warning in the log where two meshes disagree (PEAK's shorts and skirt are bound with
+  the hips turned 90° from its body: an FBX axis conversion of their own; the bind data alone cannot
+  say which is right, so check that the take stands upright) — and the arms and legs swung straight
   into a T-pose, so a rig bound in an A-pose does not raise her arms by its angle (the hands are not
   swung: the line to the fingers is not a hand's axis). Only the rest's rotations and the distances
   between bones are used, so it does not matter where the bind pose sat against the root. A humanoid
@@ -670,10 +675,23 @@ astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator);
   ```
 
   At least the hips, spine, head, both arms (upper, lower, hand) and both legs (upper, lower, foot);
-  add the chest, neck, shoulders, toes and fingers the rig has. Leave out a bone the game AIMS (one
-  that turns with the camera): its turn is the player's mouse, not the move. A game that animates
+  add the chest, neck, shoulders, toes and fingers the rig has. A game that animates
   one rig and skins a ragdoll COPY of it works too: a bone that is not skinned itself takes the bind
   pose of the skinned bone with its name.
+- **A bone the game turns for its own reasons** — one that follows the camera, a recoil, a lean
+  the player steers — is not the move. Leaving it out of the map is not enough: the capture reads
+  world rotations, so its turn reaches every bone below it. Name it to hold it STILL:
+
+  ```csharp
+  astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator, Bones, still: new[] { "AimJoint" });
+  ```
+
+  Each frame its turn away from its bind pose (against its parent) is taken back out of every
+  captured bone below it, and after each take the log says how much was taken out:
+  `capture: 'AimJoint' was held still in the take: up to 0° of its turn taken out of the 34 bones
+  below it` (PEAK, climbing: its scouts do not aim AimJoint on a wall). A held bone is never one of
+  the captured bones, so a captured bone the game ALSO turns with the camera keeps that turn (PEAK
+  nods its scout's head with the look, about 12° up and down: it stays in the clip).
 - **What cannot be captured.** An Animator with "Optimize Game Objects" on has no bone transforms
   (the log names the missing bones). An IL2CPP game whose build stripped a skinned mesh's bones or
   bind poses, or the Animator's humanoid bones, has no capture (the foundation goes on without it).

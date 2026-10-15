@@ -29,32 +29,52 @@ namespace Astra.Unity
     {
         readonly Transform root;
         readonly Transform[] bones;
+        /// <summary>The bones held still (<see cref="HeldBone"/>), outermost first, with their
+        /// transforms and their parents'.</summary>
+        readonly HeldBone[] held;
+        readonly Transform[] heldBone, heldParent;
+        readonly Quat[] heldUndo;
+        readonly Vec3[] heldAt;
         public CaptureSkeleton Skeleton { get; }
+        /// <summary>The bones this rig holds still (empty when none).</summary>
+        public HeldBone[] Held => held;
         /// <summary>The Animator this rig was read from.</summary>
         public readonly Animator Animator;
 
-        PoseRig(Animator animator, Transform[] bones, CaptureSkeleton skeleton)
+        PoseRig(Animator animator, Transform[] bones, CaptureSkeleton skeleton, List<(HeldBone Held, Transform Bone)> holds)
         {
             Animator = animator;
             root = animator.transform;
             this.bones = bones;
             Skeleton = skeleton;
+            held = new HeldBone[holds.Count];
+            heldBone = new Transform[holds.Count];
+            heldParent = new Transform[holds.Count];
+            for (int i = 0; i < holds.Count; i++)
+            {
+                held[i] = holds[i].Held;
+                heldBone[i] = holds[i].Bone;
+                heldParent[i] = holds[i].Bone.parent;
+            }
+            heldUndo = new Quat[holds.Count];
+            heldAt = new Vec3[holds.Count];
         }
 
 #if ASTRA_NO_CAPTURE_RIG
         /// <summary>This build's game stripped what a capture reads (see the IL2CPP project's checks):
         /// the call fails the way a member stripped at run time does, so the capture's Feature goes off.</summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
-        public static PoseRig Find(Animator animator, Dictionary<string, string> names, out string why, out string report, out List<string> warnings) =>
+        public static PoseRig Find(Animator animator, Dictionary<string, string> names, string[] still, out string why, out string report, out List<string> warnings) =>
             throw new MissingMethodException("this plugin was built against an interop that lacks SkinnedMeshRenderer.bones, Mesh.bindposes, Animator.isHuman or Animator.GetBoneTransform");
 #else
         /// <summary>The rig of <paramref name="animator"/>, or null with <paramref name="why"/> (a
         /// Generic rig without names, a bone not found, no bind pose for one, a rig that is not a VRM
         /// humanoid). <paramref name="names"/>: VRM bone → transform name, or null for a humanoid.
         /// <paramref name="warnings"/>: what is doubtful about the rest (meshes that disagree, a
-        /// mirrored or skewed bind pose).</summary>
+        /// mirrored or skewed bind pose). <paramref name="still"/>: transform names under the Animator to
+        /// hold still (<see cref="HeldBone"/>), or null.</summary>
         [MethodImpl(MethodImplOptions.NoInlining)] // a member the game stripped fails HERE, inside the capture's Feature
-        public static PoseRig Find(Animator animator, Dictionary<string, string> names, out string why, out string report, out List<string> warnings)
+        public static PoseRig Find(Animator animator, Dictionary<string, string> names, string[] still, out string why, out string report, out List<string> warnings)
         {
             report = null;
             warnings = new List<string>();
@@ -74,11 +94,15 @@ namespace Astra.Unity
                     if (t != null) map[vrm] = t;
                 }
             }
-            else
+            Dictionary<string, Transform> byName = null;
+            if (names != null || (still != null && still.Length > 0))
             {
                 // One walk of the hierarchy, the first of each name depth-first.
-                var byName = new Dictionary<string, Transform>();
+                byName = new Dictionary<string, Transform>();
                 Index(animator.transform, byName);
+            }
+            if (names != null)
+            {
                 var missing = new List<string>();
                 foreach (var kv in names)
                 {
@@ -92,9 +116,31 @@ namespace Astra.Unity
                 }
             }
 
-            // Every skinned mesh UNDER THE ANIMATOR, with the bind pose of each mapped bone it skins.
+            // The bones to hold still, and their parents: their bind poses are read with the rest.
             var mapped = new HashSet<int>();
             foreach (var t in map.Values) mapped.Add(t.GetInstanceID());
+            var holdWanted = new List<(string Name, Transform Bone)>();
+            var extra = new Dictionary<string, Transform>();
+            foreach (var name in still ?? new string[0])
+            {
+                if (!byName.TryGetValue(name, out var t) || t == animator.transform || t.parent == null)
+                {
+                    warnings.Add($"cannot hold '{name}' still: no such bone under '{animator.name}'");
+                    continue;
+                }
+                if (mapped.Contains(t.GetInstanceID()))
+                {
+                    warnings.Add($"cannot hold '{name}' still: it is one of the captured bones");
+                    continue;
+                }
+                holdWanted.Add((name, t));
+                extra["held:" + name] = t;
+                extra["heldparent:" + name] = t.parent;
+            }
+            var lookup = new Dictionary<string, Transform>(map);
+            foreach (var kv in extra) lookup[kv.Key] = kv.Value;
+
+            // Every skinned mesh UNDER THE ANIMATOR, with the bind pose of each mapped bone it skins.
             var toRoot = animator.transform.worldToLocalMatrix;
             var meshes = new List<BindMesh>();
             foreach (var smr in animator.GetComponentsInChildren<SkinnedMeshRenderer>(true))
@@ -119,7 +165,7 @@ namespace Astra.Unity
                 // The mesh's frame, from where it is now: a mesh that does not move with a bone does
                 // not move against the root (one that does is used last: BindRest).
                 var meshToRoot = toRoot * smr.transform.localToWorldMatrix;
-                foreach (var kv in map)
+                foreach (var kv in lookup)
                 {
                     if (!byId.TryGetValue(kv.Value.GetInstanceID(), out int i) && !byBoneName.TryGetValue(kv.Value.name, out i)) continue;
                     var m = meshToRoot * bind[i].inverse;
@@ -133,7 +179,10 @@ namespace Astra.Unity
                 }
                 if (bm.Bones.Count > 0) meshes.Add(bm);
             }
-            var rest = BindRest.Choose(meshes, map.Keys, out warnings, out var noBind, out string source);
+            var all = BindRest.Choose(meshes, lookup.Keys, out var restWarnings, out var noBindAll, out string source);
+            warnings.AddRange(restWarnings);
+            var rest = all.FindAll(r => map.ContainsKey(r.Name));
+            var noBind = noBindAll.FindAll(n => map.ContainsKey(n));
             var skeleton = CaptureSkeleton.Build(rest, out why);
             if (skeleton == null)
             {
@@ -142,14 +191,38 @@ namespace Astra.Unity
             }
             var ordered = new Transform[skeleton.Bones.Length];
             for (int i = 0; i < ordered.Length; i++) ordered[i] = map[skeleton.Bones[i]];
+            var holds = new List<(HeldBone Held, Transform Bone)>();
+            foreach (var (name, bone) in holdWanted)
+            {
+                int b = all.FindIndex(r => r.Name == "held:" + name), p = all.FindIndex(r => r.Name == "heldparent:" + name);
+                if (b < 0 || p < 0)
+                {
+                    warnings.Add($"cannot hold '{name}' still: no bind pose for it or its parent under '{animator.name}'");
+                    continue;
+                }
+                var below = new List<int>();
+                for (int i = 0; i < ordered.Length; i++)
+                    if (ordered[i] != bone && ordered[i].IsChildOf(bone)) below.Add(i);
+                holds.Add((new HeldBone(name, all[p].Rotation.Inverse * all[b].Rotation, below.ToArray()), bone));
+            }
+            // Outermost first: a held bone below another is measured after the outer one's undo.
+            holds.Sort((x, y) => Depth(x.Bone).CompareTo(Depth(y.Bone)));
             report = $"{skeleton.Bones.Length} bones of '{animator.name}' ({(names == null ? "humanoid" : "named by the integration")}), rest from '{source}' ({meshes.Count} skinned meshes under it)"
                 + $", rest hips {skeleton.RestPositions[0].Y:0.###} above the feet"
                 + (skeleton.StraightenedBone != null ? $", straightened to a T-pose (most: {skeleton.StraightenedBone} by {skeleton.Straightened:0}°)" : "")
-                + (noBind.Count > 0 ? $"; left out (no bind pose): {string.Join(", ", noBind)}" : "");
+                + (noBind.Count > 0 ? $"; left out (no bind pose): {string.Join(", ", noBind)}" : "")
+                + (holds.Count > 0 ? "; held still: " + string.Join(", ", holds.ConvertAll(h => $"{h.Held.Name} ({h.Held.Below.Length} bones below)")) : "");
             why = null;
-            return new PoseRig(animator, ordered, skeleton);
+            return new PoseRig(animator, ordered, skeleton, holds);
         }
 #endif
+
+        static int Depth(Transform t)
+        {
+            int d = 0;
+            for (var p = t.parent; p != null; p = p.parent) d++;
+            return d;
+        }
 
         /// <summary>Does <paramref name="t"/> hang below one of the <paramref name="mapped"/> bones
         /// (before reaching <paramref name="top"/>)?</summary>
@@ -187,6 +260,26 @@ namespace Astra.Unity
                 if (b == null) return false;
                 world[i] = Q(b.rotation);
                 positions[i] = V(b.position);
+            }
+            // The held bones' turns out of everything below them, outermost first: a held bone below
+            // another is read as the outer undo leaves it.
+            for (int k = 0; k < held.Length; k++)
+            {
+                var bone = heldBone[k];
+                var parent = heldParent[k];
+                if (bone == null || parent == null) return false;
+                var wp = Q(parent.rotation);
+                var wb = Q(bone.rotation);
+                var pb = V(bone.position);
+                for (int j = 0; j < k; j++)
+                {
+                    if (!bone.IsChildOf(heldBone[j])) continue;
+                    if (parent.IsChildOf(heldBone[j])) wp = heldUndo[j] * wp;
+                    wb = heldUndo[j] * wb;
+                    pb = heldAt[j] + heldUndo[j].Rotate(pb - heldAt[j]);
+                }
+                heldUndo[k] = held[k].Apply(wp, wb, pb, world, positions);
+                heldAt[k] = pb;
             }
             rootPose = new RootPose(Q(root.rotation), V(root.position), V(root.lossyScale));
             return true;

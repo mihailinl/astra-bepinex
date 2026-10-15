@@ -47,10 +47,16 @@ namespace Astra.Sdk
         /// hand) and both legs (upper, lower, foot); add the chest, neck, shoulders, toes and fingers
         /// you have. Null for a humanoid Animator, whose bones Unity knows. The rest pose is the rig's
         /// bind pose (its skinned meshes'), straightened to a T-pose.</param>
+        /// <param name="still">Bones the game turns for its OWN reasons, which are not the move — by
+        /// transform name under the Animator (PEAK: <c>"AimJoint"</c>, which turns the upper body with
+        /// where the player looks). Each frame such a bone's turn away from its bind pose is taken
+        /// back out of every captured bone below it; leaving it out of <paramref name="bones"/> alone
+        /// does not do that (a capture reads world rotations). Not one of the captured bones. Null:
+        /// none.</param>
         /// <exception cref="ArgumentException"><paramref name="param"/> is not declared as a bool, is
-        /// captured already, or <paramref name="clip"/> or <paramref name="bones"/> is not one Astra
-        /// takes.</exception>
-        public GameIntegration CaptureWhile(string param, string clip, Func<Animator> player, IDictionary<string, string> bones = null)
+        /// captured already, or <paramref name="clip"/>, <paramref name="bones"/> or
+        /// <paramref name="still"/> is not one Astra takes.</exception>
+        public GameIntegration CaptureWhile(string param, string clip, Func<Animator> player, IDictionary<string, string> bones = null, IEnumerable<string> still = null)
         {
             if (player == null) throw new ArgumentNullException(nameof(player));
             bool declaredBool = false;
@@ -78,7 +84,14 @@ namespace Astra.Sdk
                     if (!map.ContainsKey(r)) missing.Add(r);
                 if (missing.Count > 0) throw new ArgumentException("a capture needs the bones " + string.Join(", ", missing), nameof(bones));
             }
-            Captures.Add(new CaptureRequest(param, clip, player, map));
+            var held = new List<string>();
+            foreach (var name in still ?? new string[0])
+            {
+                if (string.IsNullOrEmpty(name)) throw new ArgumentException("a bone to hold still has no name", nameof(still));
+                if (map != null && map.ContainsValue(name)) throw new ArgumentException($"'{name}' is one of the captured bones: it cannot also be held still", nameof(still));
+                if (!held.Contains(name)) held.Add(name);
+            }
+            Captures.Add(new CaptureRequest(param, clip, player, map, held.ToArray()));
             return this;
         }
     }
@@ -91,13 +104,16 @@ namespace Astra.Sdk
         public readonly Func<Animator> Player;
         /// <summary>VRM bone → transform name, for a Generic rig; null for a humanoid Animator.</summary>
         public readonly Dictionary<string, string> Bones;
+        /// <summary>Transform names to hold still (<see cref="HeldBone"/>); empty when none.</summary>
+        public readonly string[] Still;
 
-        public CaptureRequest(string param, string clip, Func<Animator> player, Dictionary<string, string> bones)
+        public CaptureRequest(string param, string clip, Func<Animator> player, Dictionary<string, string> bones, string[] still)
         {
             Param = param;
             Clip = clip;
             Player = player;
             Bones = bones;
+            Still = still;
         }
     }
 }

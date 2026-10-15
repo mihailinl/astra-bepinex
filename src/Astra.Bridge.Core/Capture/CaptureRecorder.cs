@@ -62,6 +62,14 @@ namespace Astra.Bridge.Capture
         /// <summary>How long the parameter must have been true before the first sample, in seconds.</summary>
         public const double LeadIn = 0.3;
 
+        /// <summary>How long the parameter must have been false before a take ends, in seconds: a
+        /// one-frame false mid-climb does not split the take (nothing is sampled while it is false).</summary>
+        public const double EndAfter = 0.2;
+
+        /// <summary>The least time between two "take not kept" lines, in seconds: a parameter that
+        /// flickers must not flood the game's log.</summary>
+        public const double QuietLines = 10;
+
         /// <summary>The most takes one recorder offers in a game run.</summary>
         public const int MaxTakes = 3;
 
@@ -83,7 +91,9 @@ namespace Astra.Bridge.Capture
         Vec3[] worldAt, at;
         Quat frozen;             // the root's rotation at the take's first sample: the take's frame
         double firstAt, nextSample;
-        long lastSecond;
+        double falseSince = double.NaN;        // the parameter turned false mid-take at; NaN = it is true
+        double lastQuiet = double.NegativeInfinity;
+        int quieted;                           // "not kept" lines held back since the last one
         WriteJob job;            // the take being written / waiting to be offered
         volatile bool disposed;
 
@@ -151,15 +161,24 @@ namespace Astra.Bridge.Capture
                 case CaptureState.Recording:
                     if (!want)
                     {
-                        Finish();
+                        // A false inside the lead-in is a flicker, not a take: nothing, not even a line.
+                        if (take.Count == 0)
+                        {
+                            Reset();
+                            break;
+                        }
+                        // A take ends once the parameter has STAYED false; nothing is sampled meanwhile.
+                        if (double.IsNaN(falseSince)) falseSince = now;
+                        if (now - falseSince >= EndAfter) Finish(now);
                         break;
                     }
+                    falseSince = double.NaN;
                     if (now >= nextSample) Sample(now);
                     if (State == CaptureState.Recording && take.Duration >= MaxSeconds)
                     {
                         Say($"the take of '{Clip}' reached {MaxSeconds:0} s: it ends here");
                         waitForFalse = true;
-                        Finish();
+                        Finish(now);
                     }
                     break;
                 case CaptureState.Writing:
@@ -237,8 +256,8 @@ namespace Astra.Bridge.Capture
             }
             take = new CapturedClip(s.Skeleton);
             nextSample = now + LeadIn;
+            falseSince = double.NaN;
             State = CaptureState.Recording;
-            log($"capturing '{Clip}' while '{For}' is true (take {Takes + 1} of at most {MaxTakes}, {n} bones, from {LeadIn:0.0} s in)");
         }
 
         void Sample(double now)
@@ -254,6 +273,7 @@ namespace Astra.Bridge.Capture
                     {
                         frozen = root.Rotation;
                         firstAt = now;
+                        log($"capturing '{Clip}' while '{For}' is true (take {Takes + 1} of at most {MaxTakes}, {world.Length} bones, from {LeadIn:0.0} s in)");
                     }
                     RootPose.ToTakeFrame(frozen, root, world, worldAt, world.Length, live, at);
                     ok = take.Skeleton.Normalize(live, at, local, out hips);
@@ -276,12 +296,12 @@ namespace Astra.Bridge.Capture
             if (nextSample <= now) nextSample = now + 1 / Rate;
         }
 
-        void Finish()
+        void Finish(double now)
         {
             var clip = take;
             if (clip == null || clip.Count < 2 || clip.Duration < MinSeconds)
             {
-                log($"the take of '{Clip}' lasted {(clip?.Duration ?? 0):0.0} s past its lead-in (the least is {MinSeconds:0.0} s): not kept");
+                Quiet(now, $"the take of '{Clip}' lasted {(clip?.Duration ?? 0):0.0} s past its lead-in (the least is {MinSeconds:0.0} s): not kept");
                 Reset();
                 return;
             }
@@ -365,21 +385,19 @@ namespace Astra.Bridge.Capture
             Reset();
         }
 
-        /// <summary><c>&lt;clip&gt;-&lt;unix seconds&gt;.vrma</c>, the next second when that one (or
-        /// its <c>.part</c>) is taken: never longer than the engine echoes back.</summary>
+        /// <summary><c>&lt;clip&gt;-&lt;unix seconds&gt;.vrma</c>, the second reserved through the game's
+        /// <see cref="OfferGate"/> (the next one when that one, or its <c>.part</c>, is taken): never
+        /// longer than the engine echoes back.</summary>
         string NewFileName()
         {
-            long s = Math.Max(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), lastSecond + 1);
-            for (int i = 0; i < 100; i++, s++)
+            long s = gate.Reserve(Clip, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), second =>
             {
-                string name = CaptureInbox.FileName(Clip, s);
-                if (!CaptureInbox.ValidFileName(name) || name.Length > CaptureInbox.MaxEchoedName) return null;
-                string p = Path.Combine(inbox, name);
-                if (File.Exists(p) || File.Exists(p + ".part") || offered.ContainsKey(name)) continue;
-                lastSecond = s;
-                return name;
-            }
-            return null;
+                string p = Path.Combine(inbox, CaptureInbox.FileName(Clip, second));
+                return File.Exists(p) || File.Exists(p + ".part") || offered.ContainsKey(CaptureInbox.FileName(Clip, second));
+            });
+            if (s < 0) return null;
+            string name = CaptureInbox.FileName(Clip, s);
+            return CaptureInbox.ValidFileName(name) && name.Length <= CaptureInbox.MaxEchoedName ? name : null;
         }
 
         void InboxChanged(string next)
@@ -430,6 +448,20 @@ namespace Astra.Bridge.Capture
             State = CaptureState.Idle;
             take = null;
             sampler = null;
+        }
+
+        /// <summary>Log <paramref name="line"/> unless one was said less than <see cref="QuietLines"/>
+        /// ago (then count it, and say how many were held back with the next).</summary>
+        void Quiet(double now, string line)
+        {
+            if (now - lastQuiet < QuietLines)
+            {
+                quieted++;
+                return;
+            }
+            lastQuiet = now;
+            log(quieted > 0 ? $"{line} (and {quieted} more like it before)" : line);
+            quieted = 0;
         }
 
         /// <summary>Log <paramref name="line"/> once per recorder.</summary>

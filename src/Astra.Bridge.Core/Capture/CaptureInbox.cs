@@ -114,9 +114,11 @@ namespace Astra.Bridge.Capture
     }
 
     /// <summary>
-    /// ONE pace for every recorder of a game: two <c>clip_ready</c> at least <see cref="Gap"/> apart,
-    /// whichever recorders they come from (the engine refuses a second within 500 ms of a connection's
-    /// last). Main thread only.
+    /// ONE pace and ONE set of file names for every recorder of a game: two <c>clip_ready</c> at least
+    /// <see cref="Gap"/> apart, whichever recorders they come from (the engine refuses a second within
+    /// 500 ms of a connection's last), and each take's second reserved here, so two captures of the
+    /// same clip name finishing on one frame never pick the same file (review r2: the second writer's
+    /// <c>CreateNew</c> threw and its take was lost). Main thread only.
     /// </summary>
     public sealed class OfferGate
     {
@@ -124,11 +126,30 @@ namespace Astra.Bridge.Capture
         public const double Gap = 0.6;
 
         double last = double.NegativeInfinity;
+        readonly System.Collections.Generic.Dictionary<string, long> lastSecond = new System.Collections.Generic.Dictionary<string, long>();
 
         /// <summary>May an offer go now?</summary>
         public bool Open(double now) => now - last >= Gap;
 
         /// <summary>An offer went at <paramref name="now"/>.</summary>
         public void Sent(double now) => last = now;
+
+        /// <summary>
+        /// The second a new take of <paramref name="clip"/> is named after: <paramref name="now"/>, or
+        /// the next one this game has not reserved for that clip yet and <paramref name="taken"/> does
+        /// not refuse (a file of that name already in the inbox) — reserved here before the writer
+        /// creates anything. -1 when 100 seconds in a row are taken.
+        /// </summary>
+        public long Reserve(string clip, long now, Func<long, bool> taken)
+        {
+            long s = lastSecond.TryGetValue(clip, out var l) ? Math.Max(now, l + 1) : now;
+            for (int i = 0; i < 100; i++, s++)
+            {
+                if (taken != null && taken(s)) continue;
+                lastSecond[clip] = s;
+                return s;
+            }
+            return -1;
+        }
     }
 }

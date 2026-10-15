@@ -63,7 +63,7 @@ public class CaptureReviewTests : IDisposable
         Assert.Throws<ArgumentException>(() => new CaptureRecorder(new string('c', 49), "climbing", null));
         var r = new CaptureRecorder(new string('c', 48), "climbing", l => log.Add(l), a => a());
         Play(r, 2.5, true);
-        Play(r, 0.2, false);
+        Play(r, 0.3, false);
         var file = Assert.Single(Files());
         Assert.InRange(file.Length, 1, CaptureInbox.MaxEchoedName);
         r.Refused(file.Length > 64 ? file.Substring(0, 64) : file); // what the engine's clip_refused carries
@@ -82,7 +82,7 @@ public class CaptureReviewTests : IDisposable
         for (long s = now0; s < now0 + 3; s++) File.WriteAllText(Path.Combine(inbox, CaptureInbox.FileName(clip, s)), "taken");
         var r = new CaptureRecorder(clip, "climbing", l => log.Add(l), a => a());
         Play(r, 2.5, true);
-        Play(r, 0.2, false);
+        Play(r, 0.3, false);
         var mine = Files().Except(Enumerable.Range(0, 3).Select(i => CaptureInbox.FileName(clip, now0 + i))).Single();
         Assert.Equal(64, mine.Length);
         Assert.Matches("^" + clip + @"-\d{10}\.vrma$", mine);
@@ -135,7 +135,7 @@ public class CaptureReviewTests : IDisposable
         Assert.Empty(sent);
 
         Play(r, 2.5, true);
-        Play(r, 0.05, false); // finished: its writer has not run yet
+        Play(r, 0.25, false); // finished: its writer has not run yet
         Assert.Equal(CaptureState.Writing, r.State);
         Play(r, 0.05, false, dir: null);
         RunWrites();
@@ -246,7 +246,7 @@ public class CaptureReviewTests : IDisposable
     {
         var r = Deferred();
         Play(r, 2.5, true);
-        Play(r, 0.05, false);
+        Play(r, 0.25, false);
         Assert.Equal(CaptureState.Writing, r.State);
         r.Dispose();
         RunWrites();
@@ -254,10 +254,10 @@ public class CaptureReviewTests : IDisposable
 
         var r2 = new CaptureRecorder("climb", "climbing", l => log.Add(l), a => a());
         Play(r2, 2.5, true);
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < 16; i++)
         {
             now += 1 / 60.0;
-            r2.Step(now, inbox, false, () => rig, json => false); // written, not offered (the link is down)
+            r2.Step(now, inbox, false, () => rig, json => false); // ended, written, not offered (the link is down)
         }
         Assert.Equal(CaptureState.Ready, r2.State);
         Assert.Single(Files());
@@ -304,7 +304,7 @@ public class CaptureReviewTests : IDisposable
         var timed = new CaptureRig.Sampler();
         timed.Local = _ => Enumerable.Range(0, sk.Bones.Length).Select(i => i != arm ? Quat.Identity : now - edge < 0.2 ? jump : climb).ToArray();
         var r = new CaptureRecorder("climb", "climbing", l => log.Add(l), a => a());
-        Play(r, 0.1, false);
+        Play(r, 0.3, false);
         edge = now;
         Play(r, 2.5, true, sampler: timed);
         var take = r.Take;
