@@ -184,7 +184,7 @@ public class BridgeLinkTests
         for (int i = 0; i < 50 && !warned.Exists(l => l.Contains("'seat'")); i++) await Task.Delay(50);
         http.Stop();
 
-        Assert.Contains("\"caps\":[\"warn\"]", hello);
+        Assert.Contains("\"caps\":[\"warn\",\"capture\"]", hello);
         Assert.Contains("\"params\":[{\"name\":\"speed\",\"type\":\"float\"},{\"name\":\"airborne\",\"type\":\"bool\"},{\"name\":\"climbing\",\"type\":\"bool\"}]", hello);
         lock (warned)
         {
@@ -234,7 +234,7 @@ public class BridgeLinkTests
             Assert.Equal(2, hellos.Count);
             Assert.Contains("\"params\":", hellos[0]);
             Assert.DoesNotContain("\"params\":", hellos[1]);
-            Assert.Contains("\"caps\":[\"warn\"]", hellos[1]);
+            Assert.Contains("\"caps\":[\"warn\",\"capture\"]", hellos[1]);
         }
     }
 

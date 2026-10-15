@@ -362,6 +362,11 @@ namespace Astra.Bridge
         /// <summary>Hand her back to her graph's default state.</summary>
         public static string Resume() => End(Begin("resume"));
 
+        /// <summary>The inbox a <c>{"t":"capture","inbox":…}</c> message names: a non-empty string, or
+        /// null (<c>null</c>, absent, empty or not a string = capture off).</summary>
+        public static string CaptureInboxOf(Dictionary<string, object> m) =>
+            m != null && m.TryGetValue("inbox", out var v) && v is string s && s.Length > 0 ? s : null;
+
         /// <summary>
         /// <c>clip_ready</c>: a move captured from the game, written into the capture inbox the hello
         /// reply named (<see cref="HelloReply.Inbox"/>) as <paramref name="file"/> — its bare name — to
@@ -370,9 +375,9 @@ namespace Astra.Bridge
         /// </summary>
         public static string ClipReady(string file, string name, string forParam)
         {
-            if (!Capture.CaptureRecorder.ValidFileName(file)) return Reject($"'{file}' is not a bare .vrma file name the engine takes");
-            if (!Capture.CaptureRecorder.ValidName(name)) return Reject($"'{name}' is not a clip name the engine takes");
-            if (!Capture.CaptureRecorder.ValidName(forParam)) return Reject($"'{forParam}' is not a parameter name the engine takes");
+            if (!Capture.CaptureInbox.ValidFileName(file)) return Reject($"'{file}' is not a bare .vrma file name the engine takes");
+            if (!Capture.CaptureInbox.ValidName(name)) return Reject($"'{name}' is not a clip name the engine takes");
+            if (!Capture.CaptureInbox.ValidName(forParam)) return Reject($"'{forParam}' is not a parameter name the engine takes");
             return End(Begin("clip_ready").Str("file", file).Str("name", name).Str("for", forParam));
         }
 

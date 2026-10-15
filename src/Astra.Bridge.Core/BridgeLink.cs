@@ -48,8 +48,14 @@ namespace Astra.Bridge
         readonly WarnLog warnings = new WarnLog(ParamDecl.Speed.Name, ParamDecl.Airborne.Name);
 
         /// <summary>What this side understands beyond the first contract, said in every hello
-        /// (<c>hello.caps</c>): the engine's <c>warn</c> messages, logged through <see cref="Warn"/>.</summary>
-        static readonly string[] OurCaps = { "warn" };
+        /// (<c>hello.caps</c>): the engine's <c>warn</c> messages, logged through <see cref="Warn"/>; and
+        /// its <c>capture</c> messages — the capture switch flipped while the game runs
+        /// (<see cref="CaptureInbox"/>).</summary>
+        static readonly string[] OurCaps = { "warn", "capture" };
+
+        /// <summary>The capture inbox now, as the engine names it: the hello reply's, then each
+        /// <c>capture</c> message's (only from an engine whose reply lists <c>capture-live</c>).</summary>
+        volatile string captureInbox;
 
         /// <summary>How long ago (<see cref="Environment.TickCount"/> ms) the owning game last proved,
         /// through <see cref="MarkWanted"/>, that it is alive and still wants this link. Read on the
@@ -139,6 +145,26 @@ namespace Astra.Bridge
 
         /// <summary>The last <c>error</c> the engine sent, or the last connection failure.</summary>
         public string LastError { get; private set; }
+
+        /// <summary>
+        /// The engine's capture inbox for this connection NOW (PROTOCOL.md, <c>clip_ready</c>), as the
+        /// engine names it; null while not connected, or while the player has capture off for this
+        /// game's integration. From the hello reply's <c>inbox</c>, and — from an engine that lists
+        /// <c>capture-live</c> — every <c>{"t":"capture","inbox":…}</c> after it: the player flipped
+        /// the switch while the game runs (null = off: stop at once).
+        /// </summary>
+        public string CaptureInbox => ready ? captureInbox : null;
+
+        /// <summary>Does the connected engine tell this game when the player flips the capture switch
+        /// (<c>capture-live</c>)? Without it the switch takes effect from the game's next connection.</summary>
+        public bool CaptureLive
+        {
+            get
+            {
+                var caps = hello?.Caps;
+                return caps != null && caps.Contains("capture-live");
+            }
+        }
 
         /// <summary>Does the connected engine declare <paramref name="cap"/> (<c>hello.caps</c>)? True
         /// when no hello has arrived yet, or it named no <c>caps</c> at all (an engine from before
@@ -254,6 +280,7 @@ namespace Astra.Bridge
                 if (reply.Version != Messages.ProtocolVersion)
                     Log?.Invoke($"Astra speaks protocol v{reply.Version}, this mod v{Messages.ProtocolVersion}");
                 hello = reply;
+                captureInbox = reply.Inbox;
                 LastError = null;
                 Interlocked.Increment(ref session);
                 ready = true;
@@ -261,6 +288,18 @@ namespace Astra.Bridge
                 return;
             }
             m.TryGetValue("t", out var t);
+            if ((t as string) == "capture")
+            {
+                // The capture switch, flipped while the game runs. Taken only from an engine that said
+                // it sends it (capture-live); an older one names the inbox in its hello reply alone.
+                if (!CaptureLive) return;
+                string inbox = Messages.CaptureInboxOf(m);
+                if (inbox != captureInbox) Log?.Invoke(inbox == null
+                    ? "Astra: capture is switched off for this game"
+                    : "Astra: capture is switched on for this game");
+                captureInbox = inbox;
+                return;
+            }
             if ((t as string) == "warn")
             {
                 Warned?.Invoke(Text(m, "code"), Text(m, "name"), Text(m, "why"));

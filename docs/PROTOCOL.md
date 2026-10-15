@@ -13,10 +13,12 @@ is written against.
 
 In this repository, `src/Astra.Bridge.Core` is the game side of it for .NET (no Unity in it: any .NET
 mod can use it), and the Unity foundation is built on that. The foundation sends `hello` (with
-`caps: ["warn"]`, and `params` when an integration is registered), `cam`, `avatar`, `param`, `play` /
+`caps: ["warn","capture"]`, and `params` when an integration is registered), `cam`, `avatar`, `param`, `play` /
 `trigger` / `resume` and `light`, reads the frame ring, and prints the engine's `warn` messages. From
-0.7.0 it also captures: while the hello reply names an `inbox`, an integration's `CaptureWhile`
-writes `.vrma` takes there and sends `clip_ready` (`src/Astra.Bridge.Core/Capture`).
+0.8.0 it also captures: while the engine names an `inbox` (the hello reply's, then — from an engine
+whose reply lists `capture-live` — each `{"t":"capture","inbox":…}`; the foundation's hello lists
+`capture` in its `caps`), an integration's `CaptureWhile` writes `.vrma` takes there and sends
+`clip_ready` (`src/Astra.Bridge.Core/Capture`).
 
 **What a released engine has (2026-10-14).** BRIDGE.md describes the engine as it is built today,
 ahead of its newest release, v0.2.0 (2026-10-07). v0.2.0 has the `caps` words `views`, `caster`,

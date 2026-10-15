@@ -70,12 +70,12 @@ public class CaptureRecorderTests : IDisposable
         Play(r, 0.5, false);
         Play(r, 2, true);
         Assert.Equal(CaptureState.Recording, r.State);
-        Assert.InRange(rig.Samples, 59, 62); // 2 s at 30 per second, from game frames at 60
+        Assert.InRange(rig.Samples, 50, 53); // 2 s less the 0.3 s lead-in, at 30 per second, from game frames at 60
         Play(r, 0.1, false);
         Assert.Equal(CaptureState.Idle, r.State);
         var file = Assert.Single(Files());
         Assert.Matches(@"^climb-\d{10}\.vrma$", file);
-        Assert.True(CaptureRecorder.ValidFileName(file));
+        Assert.True(CaptureInbox.ValidFileName(file));
         Assert.Equal($"{{\"t\":\"clip_ready\",\"file\":\"{file}\",\"name\":\"climb\",\"for\":\"climbing\"}}", Assert.Single(sent));
         var (json, _) = VrmaWriterTests.ReadGlb(File.ReadAllBytes(Path.Combine(inbox, file)));
         Assert.Equal("climb", json.GetProperty("animations")[0].GetProperty("name").GetString());
@@ -148,34 +148,29 @@ public class CaptureRecorderTests : IDisposable
         Assert.Equal(sent.Count, sent.Distinct().Count());
     }
 
-    /// <summary>Two offers are never closer than the engine's 500 ms (it answers a faster one with
-    /// an error): a take lasts at least <see cref="CaptureRecorder.MinSeconds"/>, and the next is
-    /// recorded only once the one before was offered — even when the link held that one back.</summary>
+    /// <summary>Two offers are never closer than the engine's 500 ms, whichever RECORDERS they come
+    /// from (review S2a): two captures of one game that finish on the same frame share one
+    /// <see cref="OfferGate"/>, and the second waits its 600 ms.</summary>
     [Fact]
-    public void two_offers_are_never_closer_than_the_engine_allows()
+    public void two_recorders_of_a_game_keep_one_gap()
     {
-        Assert.True(CaptureRecorder.MinSeconds > 0.5);
-        var r = Recorder();
-        var at = new List<double>();
-        int count = 0;
-        Play(r, 2, true);
-        connected = false;
-        Play(r, 2 / 60.0, false);
-        Assert.Equal(CaptureState.Ready, r.State);
-        Play(r, 3, true); // climbing again while the first waits: not recorded over it
-        Assert.Equal(CaptureState.Ready, r.State);
-        connected = true;
-        for (int i = 0; i < 4 * 60; i++)
+        var gate = new OfferGate();
+        var a = new CaptureRecorder("climb", "climbing", _ => { }, x => x(), gate);
+        var b = new CaptureRecorder("rope", "roping", _ => { }, x => x(), gate);
+        var sends = new List<double>();
+        void Both(double seconds, bool want)
         {
-            Play(r, 1 / 60.0, i % 120 < 100); // true, then a short false, twice
-            if (sent.Count > count)
+            for (int i = 0; i < (int)Math.Round(seconds * 60); i++)
             {
-                count = sent.Count;
-                at.Add(now);
+                now += 1 / 60.0;
+                foreach (var r in new[] { a, b }) r.Step(now, inbox, want, () => rig, j => { sends.Add(now); return true; });
             }
         }
-        Assert.True(at.Count >= 2, $"{at.Count} offers");
-        for (int i = 1; i < at.Count; i++) Assert.True(at[i] - at[i - 1] > 0.5, $"{at[i] - at[i - 1]} s apart");
+        Both(2.5, true);
+        Both(1.5, false);
+        Assert.Equal(2, sends.Count);
+        Assert.True(sends[1] - sends[0] >= OfferGate.Gap, $"{sends[1] - sends[0]:0.000} s apart");
+        Assert.True(CaptureRecorder.MinSeconds > 0.5, "one recorder's own takes are further apart than the engine's 500 ms");
     }
 
     /// <summary>The inbox goes away mid-take (the player switched capture off, or Astra went away):
@@ -247,16 +242,16 @@ public class CaptureRecorderTests : IDisposable
         Assert.Throws<ArgumentException>(() => new CaptureRecorder(".climb", "climbing", null));
         Assert.Throws<ArgumentException>(() => new CaptureRecorder("cl/imb", "climbing", null));
         Assert.Throws<ArgumentException>(() => new CaptureRecorder("climb", new string('c', 65), null));
-        Assert.False(CaptureRecorder.ValidFileName(".climb-1.vrma"));
-        Assert.False(CaptureRecorder.ValidFileName("climb-1.fbx"));
-        Assert.False(CaptureRecorder.ValidFileName("a/b.vrma"));
-        Assert.False(CaptureRecorder.ValidFileName(new string('c', 124) + ".vrma"));
-        Assert.True(CaptureRecorder.ValidFileName(new string('c', 123) + ".vrma"));
+        Assert.False(CaptureInbox.ValidFileName(".climb-1.vrma"));
+        Assert.False(CaptureInbox.ValidFileName("climb-1.fbx"));
+        Assert.False(CaptureInbox.ValidFileName("a/b.vrma"));
+        Assert.False(CaptureInbox.ValidFileName(new string('c', 124) + ".vrma"));
+        Assert.True(CaptureInbox.ValidFileName(new string('c', 123) + ".vrma"));
         Assert.Null(Messages.ClipReady("../x.vrma", "climb", "climbing"));
         Assert.Equal(@"Z:\home\u\.config\astra\inbox\capture\astra.peak",
-            CaptureRecorder.LocalInbox("/home/u/.config/astra/inbox/capture/astra.peak", windows: true));
-        Assert.Equal("/home/u/inbox", CaptureRecorder.LocalInbox("/home/u/inbox", windows: false));
-        Assert.Equal(@"C:\Users\u\inbox", CaptureRecorder.LocalInbox(@"C:\Users\u\inbox", windows: true));
+            CaptureInbox.Local("/home/u/.config/astra/inbox/capture/astra.peak", windows: true));
+        Assert.Equal("/home/u/inbox", CaptureInbox.Local("/home/u/inbox", windows: false));
+        Assert.Equal(@"C:\Users\u\inbox", CaptureInbox.Local(@"C:\Users\u\inbox", windows: true));
     }
 
     /// <summary>The hello reply's <c>inbox</c> is read; an empty one is no inbox. A frame's flag is
@@ -328,7 +323,7 @@ public class CaptureRecorderTests : IDisposable
         {
             now += 1 / 60.0;
             link.MarkWanted();
-            r.Step(now, CaptureRecorder.LocalInbox(link.Hello?.Inbox), want, () => rig, link.Send);
+            r.Step(now, CaptureInbox.Local(link.Hello?.Inbox), want, () => rig, link.Send);
         }
         for (int i = 0; i < 120; i++) Frame(true);
         for (int i = 0; i < 250 && !refuseNow.Task.IsCompleted; i++)

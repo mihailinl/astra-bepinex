@@ -608,7 +608,7 @@ player's own edits apart from your pack, so your updates never overwrite them. T
 does not know `${astra_pack_inbox}`, and it refuses a manifest that names a placeholder it does not
 know. Do not ship one yet.
 
-**Capturing the game's own animation (SDK 0.7.0).** Your game already animates its player climbing,
+**Capturing the game's own animation (SDK 0.8.0).** Your game already animates its player climbing,
 swimming, dancing. The foundation can sample that animation while one of your raw facts is true and
 offer it to the player as her move for that fact:
 
@@ -620,30 +620,43 @@ astra.OnFrame(f => f.Params.Set("climbing", MyPlayer.Climbing));
 astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator);
 ```
 
+- **The foundation 0.8.0 or newer.** `CaptureWhile` is new in 0.8.0. Built against SDK 0.8.0, your
+  `[BepInDependency(AstraSdk.Guid, AstraSdk.Dependency)]` asks for that foundation: beside an older
+  one BepInEx does not load your plugin and says so in its log (never a `MissingMethodException`
+  in your `Awake`). Name `AstraSdk.Dependency` there, never a version of your own.
 - **The player switches it on, per integration, in Astra** (Parameters › Games, off by default).
-  Only then does the engine's reply to your `hello` name a capture inbox; without one the foundation
-  records nothing at all. You cannot switch it on from your code.
-- While the parameter is true, the player's rig is sampled 30 times a second. When it turns false,
-  the take is written as a `.vrma` (VRM Animation) into the inbox and offered to the engine
-  (`clip_ready`, [`PROTOCOL.md`](PROTOCOL.md)). Astra files it in the player's own pack for your game
-  ("My My Game moves") as `captured-climb`, which replaces nothing she plays, and asks the player:
-  **[Use for climbing]**, **[Keep]** or **[Discard]**.
-- **Bounds.** A take lasts 1.5 to 60 seconds (a shorter one is dropped, a longer one ends at 60), at
-  most three takes are offered per game run, and a take the engine refuses (`clip_refused`, printed
-  once in the log) is removed from the inbox again.
+  Only then does the engine name a capture inbox; without one the foundation records nothing at
+  all. You cannot switch it on from your code. An Astra that lists `capture-live` tells a running
+  game when the player flips the switch: off stops a take at once (nothing of it is kept), on starts
+  capturing without a restart. With an older Astra the switch takes effect from the game's next
+  start.
+- While the parameter is true, the player's rig is sampled 30 times a second, from 0.3 s after it
+  turned true: the game's way INTO the state (a jump at the wall, arms flung out) is not the state.
+  When it turns false, the take is written as a `.vrma` (VRM Animation) into the inbox and offered to
+  the engine (`clip_ready`, [`PROTOCOL.md`](PROTOCOL.md)). Astra files it in the player's own pack
+  for your game ("My My Game moves") as `captured-climb`, which replaces nothing she plays, and asks
+  the player: **[Use for climbing]**, **[Keep]** or **[Discard]**.
+- **Bounds.** A take lasts 1.5 to 60 seconds after its lead-in (a shorter one is dropped, a longer
+  one ends at 60), at most three takes are offered per game run, and the game's offers are at least
+  600 ms apart whichever captures they come from. A take the engine refuses (`clip_refused`, printed
+  once in the log) is removed from the inbox when the refusal reaches the game; one whose refusal
+  never did (the game closed first) is removed when the game next finds the inbox, ten minutes on.
 - **What is captured.** Each humanoid bone's rotation against the rig's REST pose, turned into the
   VRM normalized pose (the same file a VRM animation tool writes), and where the hips are against the
-  FEET (above the lowest foot, across from their midpoint). The clip plays in place: the character's
-  travel through the world, and its root's heading, are the game's. Each take is turned so the body
-  faces front at its start (PEAK turns its scout's root with the camera while the body faces the
-  wall); a turn within the take stays. Eyes and jaw are left out: her gaze and her mouth are her own.
-- **The rest pose** is the bind pose of the character's skinned meshes, with the arms and legs swung
-  straight into a T-pose, so a rig bound in an A-pose does not raise her arms by its angle (the
-  hands are not swung: the line to the fingers is not a hand's axis). Only the rest's rotations and
-  the distances between bones are used, so it does not matter where the bind pose sat against the
-  root. The log says what it found: `capture: 45 bones of 'Scout' (named by the integration), rest
-  from 13 skinned meshes (45 skinned themselves), rest hips 1.886 above the feet, straightened to a
-  T-pose (most: rightUpperLeg by 4°)`.
+  FEET (above the lowest foot, across from their midpoint). A take is measured in the character's
+  frame as it was when the take began, so a root the game turns with the camera (PEAK's) does not
+  put the player's mouse into the clip, and it is turned so the body faces front at its start. The
+  clip plays in place: the character's travel through the world is the game's. A turn of the body
+  within the take stays. Eyes and jaw are left out: her gaze and her mouth are her own.
+- **The rest pose** is the bind pose of the skinned meshes under the Animator — the one that skins
+  the most of the bones you named (a body, not a glove or a hat; a mesh that hangs from a bone
+  last), with a warning in the log where two meshes disagree — and the arms and legs swung straight
+  into a T-pose, so a rig bound in an A-pose does not raise her arms by its angle (the hands are not
+  swung: the line to the fingers is not a hand's axis). Only the rest's rotations and the distances
+  between bones are used, so it does not matter where the bind pose sat against the root. A humanoid
+  Avatar's own T-pose is not used. The log says what it found: `capture: 45 bones of 'Scout' (named
+  by the integration), rest from 'Body' (13 skinned meshes under it), rest hips 1.886 above the
+  feet, straightened to a T-pose (most: rightUpperLeg by 4°)`.
 - **A Generic rig** (an Animator with no Avatar: `isHuman` is false) has no humanoid bones Unity
   knows. Name them, by transform name under the Animator:
 
@@ -657,15 +670,21 @@ astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator);
   ```
 
   At least the hips, spine, head, both arms (upper, lower, hand) and both legs (upper, lower, foot);
-  add the chest, neck, shoulders, toes and fingers the rig has. A game that animates one rig and
-  skins a ragdoll COPY of it works too: a bone that is not skinned itself takes the bind pose of the
-  skinned bone with its name.
+  add the chest, neck, shoulders, toes and fingers the rig has. Leave out a bone the game AIMS (one
+  that turns with the camera): its turn is the player's mouse, not the move. A game that animates
+  one rig and skins a ragdoll COPY of it works too: a bone that is not skinned itself takes the bind
+  pose of the skinned bone with its name.
+- **What cannot be captured.** An Animator with "Optimize Game Objects" on has no bone transforms
+  (the log names the missing bones). An IL2CPP game whose build stripped a skinned mesh's bones or
+  bind poses, or the Animator's humanoid bones, has no capture (the foundation goes on without it).
 - **`CaptureWhile` throws** an `ArgumentException` for a parameter not declared as a bool, a
-  parameter captured already, a clip name that is not 1–64 of `A-Z a-z 0-9 _ . -` (not starting with
+  parameter captured already, a clip name that is not 1–48 of `A-Z a-z 0-9 _ . -` (not starting with
   a dot), and a bone map with a name that is not a VRM humanoid bone or missing a required one.
 - **Test it without reaching the state.** Start the game with `ASTRA_CAPTURE_TEST=5` in its
   environment: once capture is on and your Animator is there, the first capture records 5 seconds of
-  the player whatever its parameter says. A test aid only; never set it for players.
+  the player whatever its parameter says, and the log also says whether anything moves the bones
+  after the foundation reads them (a late IK of the game's). A test aid only; never set it for
+  players.
 - **Local only.** A captured clip is the game's animation: it never leaves the player's machine.
   Astra refuses to export a pack that holds one. Never put captured clips (or the game's animations
   any other way) in your repository or your zip.

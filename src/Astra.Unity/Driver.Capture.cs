@@ -15,20 +15,28 @@ namespace Astra.Unity
     /// The driver's part in CAPTURING the game's own animation (<see cref="GameIntegration.CaptureWhile"/>):
     /// one <see cref="CaptureRecorder"/> per capture the integration in charge registered, stepped
     /// every frame with its parameter's value from the frame the integration just set, and the
-    /// engine's capture inbox — present only while the player has capture switched on for this
-    /// integration in Astra. Optional: a failure switches capturing off and nothing else.
+    /// engine's capture inbox (<see cref="BridgeLink.CaptureInbox"/>) — present only while the player
+    /// has capture switched on for this integration in Astra. Every recorder offers through ONE
+    /// <see cref="OfferGate"/>. Optional: a failure switches capturing off and nothing else.
     /// </summary>
     public sealed partial class Driver
     {
         /// <summary>Capturing the game's animation: off by its first failure, never her.</summary>
         readonly Feature capturing = new Feature("capturing the game's animation");
         readonly List<Capturer> capturers = new List<Capturer>();
+        /// <summary>The game's one pace for offers, shared by every recorder.</summary>
+        readonly OfferGate offers = new OfferGate();
         /// <summary>The integration whose captures <see cref="capturers"/> are.</summary>
         GameIntegration capturersFor;
         /// <summary>The files the engine refused (<c>clip_refused</c>), from the link's thread.</summary>
         readonly ConcurrentQueue<string> refusedClips = new ConcurrentQueue<string>();
         Action<bool> stepCapture;
         Func<string, bool> sendToLink;
+        /// <summary>The last inbox the engine named, and whether this game can reach it — asked once
+        /// per inbox, not every frame.</summary>
+        string inboxSeen, inboxReachable;
+        /// <summary>The link session the capture switch's state was last said for.</summary>
+        int captureSaidFor = -1;
         // ASTRA_CAPTURE_TEST (seconds): record that long of the player once capture is on, whatever the
         // parameter says — a test aid for a state the tester cannot reach (a climb, headless).
         bool captureTestRead;
@@ -39,7 +47,10 @@ namespace Astra.Unity
             public CaptureRequest Request;
             public CaptureRecorder Recorder;
             public PoseRig Rig;
-            public string LastWhy;
+            /// <summary>The Animator a rig could not be read from (instance id), and why: not tried
+            /// again until the player's Animator is another one.</summary>
+            public int FailedFor;
+            public string FailedWhy;
             public Func<IPoseSampler> Find;
         }
 
@@ -70,7 +81,7 @@ namespace Astra.Unity
                         var c = new Capturer
                         {
                             Request = req,
-                            Recorder = new CaptureRecorder(req.Clip, req.Param, m => log.LogInfo("capture: " + m)),
+                            Recorder = new CaptureRecorder(req.Clip, req.Param, m => log.LogInfo("capture: " + m), gate: offers),
                         };
                         c.Find = () => FindRig(c);
                         capturers.Add(c);
@@ -80,12 +91,16 @@ namespace Astra.Unity
             }
             if (capturers.Count == 0) return;
 
-            string inbox = ran && link != null && link.Ready && link.Supports("capture") ? CaptureRecorder.LocalInbox(link.Hello?.Inbox) : null;
-            if (inbox != null && !Directory.Exists(inbox))
+            bool connected = link != null && link.Ready;
+            if (connected && link.Session != captureSaidFor)
             {
-                Once("capture-inbox", $"capture: Astra's capture inbox '{inbox}' is not a folder this game can reach: nothing is captured");
-                inbox = null;
+                captureSaidFor = link.Session;
+                if (link.CaptureInbox == null)
+                    log.LogInfo(link.CaptureLive
+                        ? "capture: off for this game in Astra; switching it on there starts it at once"
+                        : "capture: off for this game in Astra; switching it on there takes effect from the game's next start (this Astra does not tell a running game)");
             }
+            string inbox = ran && connected && link.Supports("capture") ? Reachable(CaptureInbox.Local(link.CaptureInbox)) : null;
             while (refusedClips.TryDequeue(out var file))
                 foreach (var c in capturers) c.Recorder.Refused(file);
             sendToLink ??= json => link != null && link.Send(json);
@@ -97,24 +112,44 @@ namespace Astra.Unity
                 if (i == 0 && Testing(now, inbox, c)) want = true;
                 c.Recorder.Step(now, inbox, want, c.Find, sendToLink);
             }
+            if (captureTest > 0) ProbeOrder(capturers[0]);
+        }
+
+        /// <summary><paramref name="inbox"/> when this game can reach it (a folder), else null —
+        /// asked once per inbox the engine names.</summary>
+        string Reachable(string inbox)
+        {
+            if (inbox == null) return null;
+            if (inbox != inboxSeen)
+            {
+                inboxSeen = inbox;
+                inboxReachable = Directory.Exists(inbox) ? inbox : null;
+                if (inboxReachable == null) log.LogWarning($"capture: Astra's capture inbox '{inbox}' is not a folder this game can reach: nothing is captured");
+            }
+            return inboxReachable;
         }
 
         /// <summary>The player's rig for <paramref name="c"/>, read once per Animator (and again when
-        /// that one goes); null when there is none, saying why once per reason.</summary>
+        /// that one goes); null when there is none. An Animator whose rig cannot be read is not read
+        /// again (the reason is said once).</summary>
         IPoseSampler FindRig(Capturer c)
         {
             var animator = c.Request.Player();
             if (animator == null) return null;
             if (c.Rig != null && c.Rig.Alive(animator)) return c.Rig;
-            c.Rig = PoseRig.Find(animator, c.Request.Bones, out string why, out string report);
+            int id = animator.GetInstanceID();
+            if (c.FailedWhy != null && c.FailedFor == id) return null;
+            c.Rig = PoseRig.Find(animator, c.Request.Bones, out string why, out string report, out var warnings);
             if (c.Rig == null)
             {
-                if (why != c.LastWhy) log.LogWarning($"capture: cannot capture '{c.Request.Clip}': {why}");
-                c.LastWhy = why;
+                c.FailedFor = id;
+                c.FailedWhy = why;
+                log.LogWarning($"capture: cannot capture '{c.Request.Clip}': {why}");
                 return null;
             }
-            c.LastWhy = null;
+            c.FailedWhy = null;
             log.LogInfo("capture: " + report);
+            foreach (var w in warnings) log.LogWarning("capture: " + w);
             if (captureTest > 0) log.LogInfo("capture: " + c.Rig.DescribeNow());
             return c.Rig;
         }
@@ -129,7 +164,7 @@ namespace Astra.Unity
                 string s = Environment.GetEnvironmentVariable("ASTRA_CAPTURE_TEST");
                 if (float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out float v) && v > 0)
                 {
-                    captureTest = Mathf.Clamp(v, (float)CaptureRecorder.MinSeconds + 0.5f, (float)CaptureRecorder.MaxSeconds - 1);
+                    captureTest = Mathf.Clamp(v, (float)(CaptureRecorder.MinSeconds + CaptureRecorder.LeadIn) + 0.5f, (float)CaptureRecorder.MaxSeconds - 1);
                     log.LogWarning($"capture: ASTRA_CAPTURE_TEST — '{c.Request.Clip}' records {captureTest:0.#} s of the player once capture is on, whatever '{c.Request.Param}' says (a test aid)");
                 }
             }
@@ -159,6 +194,7 @@ namespace Astra.Unity
             }
             capturers.Clear();
             capturersFor = null;
+            StopProbe();
         }
     }
 }

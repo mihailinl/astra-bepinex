@@ -7,82 +7,6 @@ using System.Text;
 namespace Astra.Bridge.Capture
 {
     /// <summary>
-    /// A captured take: the skeleton it was sampled from, and one frame per sample — when it was taken
-    /// (seconds from the take's start, increasing) and each bone's VRM normalized local rotation with
-    /// the hips' position (<see cref="CaptureSkeleton.Normalize"/>, Unity's axes).
-    /// </summary>
-    public sealed class CapturedClip
-    {
-        public readonly CaptureSkeleton Skeleton;
-        public readonly List<float> Times = new List<float>();
-        /// <summary>Per frame: <c>4 · bones</c> rotation components (x, y, z, w per bone, in
-        /// <see cref="CaptureSkeleton.Bones"/>' order), then the hips' x, y, z.</summary>
-        public readonly List<float[]> Frames = new List<float[]>();
-
-        public CapturedClip(CaptureSkeleton skeleton) => Skeleton = skeleton;
-
-        public int Count => Times.Count;
-
-        /// <summary>The take's length in seconds (its last sample's time).</summary>
-        public double Duration => Times.Count == 0 ? 0 : Times[Times.Count - 1];
-
-        /// <summary>
-        /// Turn the whole take about +Y so that its FIRST frame's body (the hips' front) faces +Z, the
-        /// clip's front; returns the turn in degrees (0 when the body faces up or down, with no
-        /// front to take). The root's heading is the game's, not the body's: PEAK turns its scout's
-        /// root with the camera while the body faces the wall it climbs, so a take measured against
-        /// the root would climb sideways. A turn WITHIN the take stays in it.
-        /// </summary>
-        public double FaceForward()
-        {
-            if (Frames.Count == 0) return 0;
-            int n = Skeleton.Bones.Length;
-            var f0 = Frames[0];
-            var front = new Quat(f0[0], f0[1], f0[2], f0[3]).Normalized.Rotate(new Vec3(0, 0, 1));
-            var flat = new Vec3(front.X, 0, front.Z);
-            if (flat.Length < 0.2) return 0;
-            var forward = new Vec3(0, 0, 1);
-            var turn = flat.Z / flat.Length < -0.999999 ? Quat.AngleAxis(180, new Vec3(0, 1, 0)) : Quat.FromTo(flat, forward);
-            foreach (var f in Frames)
-            {
-                var q = (turn * new Quat(f[0], f[1], f[2], f[3])).Normalized;
-                f[0] = (float)q.X;
-                f[1] = (float)q.Y;
-                f[2] = (float)q.Z;
-                f[3] = (float)q.W;
-                var p = turn.Rotate(new Vec3(f[4 * n], f[4 * n + 1], f[4 * n + 2]));
-                f[4 * n] = (float)p.X;
-                f[4 * n + 1] = (float)p.Y;
-                f[4 * n + 2] = (float)p.Z;
-            }
-            return Quat.Angle(Quat.Identity, turn);
-        }
-
-        /// <summary>Add one frame taken at <paramref name="time"/>. Ignored (false) unless the time is
-        /// later than the last one's — a glTF animation's times only increase.</summary>
-        public bool Add(double time, Quat[] local, Vec3 hips)
-        {
-            if (!(time >= 0) || (Times.Count > 0 && !(time > Times[Times.Count - 1]))) return false;
-            int n = Skeleton.Bones.Length;
-            var f = new float[4 * n + 3];
-            for (int i = 0; i < n; i++)
-            {
-                var q = local[i];
-                f[4 * i] = (float)q.X;
-                f[4 * i + 1] = (float)q.Y;
-                f[4 * i + 2] = (float)q.Z;
-                f[4 * i + 3] = (float)q.W;
-            }
-            f[4 * n] = (float)hips.X;
-            f[4 * n + 1] = (float)hips.Y;
-            f[4 * n + 2] = (float)hips.Z;
-            Times.Add((float)time);
-            Frames.Add(f);
-            return true;
-        }
-    }
-
-    /// <summary>
     /// Writes a <see cref="CapturedClip"/> as a <c>.vrma</c>: a binary glTF 2.0 (GLB) carrying
     /// <c>VRMC_vrm_animation</c> 1.0 — the file Astra's engine reads (<c>anim/vrma.rs</c>), and any
     /// VRM Animation reader. Pure C#, no Unity: unit-tested.
@@ -127,8 +51,7 @@ namespace Astra.Bridge.Capture
                 var prev = Quat.Identity;
                 for (int f = 0; f < frames; f++)
                 {
-                    var src = clip.Frames[f];
-                    var q = new Quat(src[4 * b], src[4 * b + 1], src[4 * b + 2], src[4 * b + 3]).ToGltf().Near(prev);
+                    var q = clip.Rotation(f, b).ToGltf().Near(prev);
                     prev = q;
                     w.Write((float)q.X);
                     w.Write((float)q.Y);
@@ -140,8 +63,7 @@ namespace Astra.Bridge.Capture
             at = Begin();
             for (int f = 0; f < frames; f++)
             {
-                var src = clip.Frames[f];
-                var p = Quat.ToGltfPosition(new Vec3(src[4 * n], src[4 * n + 1], src[4 * n + 2]));
+                var p = Quat.ToGltfPosition(clip.Hips(f));
                 w.Write((float)p.X);
                 w.Write((float)p.Y);
                 w.Write((float)p.Z);

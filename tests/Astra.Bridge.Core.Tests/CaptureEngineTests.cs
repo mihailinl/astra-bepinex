@@ -90,7 +90,7 @@ public class CaptureEngineTests
                 link.MarkWanted();
                 link.Send(Messages.Avatar(her, new ParamSet().Set("climbing", want)));
                 link.Send(Messages.Cam(++id, new Vec3(0, 1, 0), new Vec3(0, 0, -1), new Vec3(0, 1, 0), 60, 320, 180));
-                recorder.Step(now, CaptureRecorder.LocalInbox(link.Hello?.Inbox), want, () => rig, json =>
+                recorder.Step(now, CaptureInbox.Local(link.Hello?.Inbox), want, () => rig, json =>
                 {
                     if (!link.Send(json)) return false;
                     file = json.Split("\"file\":\"")[1].Split('"')[0];

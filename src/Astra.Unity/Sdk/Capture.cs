@@ -13,7 +13,10 @@ namespace Astra.Sdk
         internal readonly List<CaptureRequest> Captures = new List<CaptureRequest>();
 
         /// <summary>
-        /// <b>Capture the game's own animation for her</b> while the declared true/false parameter
+        /// <b>Capture the game's own animation for her</b> (new in the foundation 0.8.0: an integration
+        /// that calls it is built against SDK 0.8.0, and its <c>[BepInDependency(AstraSdk.Guid,
+        /// AstraSdk.Dependency)]</c> then makes BepInEx refuse to load it beside an older foundation —
+        /// a line in the log, never a MissingMethodException in its <c>Awake</c>) while the declared true/false parameter
         /// <paramref name="param"/> is true: the player's character is sampled 30 times a second, and
         /// when <paramref name="param"/> turns false the take is offered to Astra as a <c>.vrma</c>
         /// clip named <paramref name="clip"/> — "the game's own <c>climb</c>, as her move for
@@ -33,7 +36,7 @@ namespace Astra.Sdk
         /// <param name="param">A parameter declared with <see cref="DeclareParam"/> as
         /// <see cref="ParamType.Bool"/> and set every frame in <see cref="FrameContext.Params"/>: the
         /// capture follows the very fact her animation set reads.</param>
-        /// <param name="clip">The clip's name (<c>climb</c>): 1–64 of <c>A-Z a-z 0-9 _ . -</c>, not
+        /// <param name="clip">The clip's name (<c>climb</c>): 1–48 of <c>A-Z a-z 0-9 _ . -</c>, not
         /// starting with a dot. Astra files it as <c>captured-climb</c>, so it replaces nothing she
         /// plays until the player says so.</param>
         /// <param name="player">The player's <see cref="Animator"/> right now, or null when there is
@@ -55,8 +58,8 @@ namespace Astra.Sdk
                 if (d.Name == param && d.Type == ParamType.Bool) declaredBool = true;
             if (!declaredBool)
                 throw new ArgumentException($"'{param}' is not a parameter this integration declared as a bool (DeclareParam(\"{param}\", ParamType.Bool) first)", nameof(param));
-            if (!CaptureRecorder.ValidClipName(clip))
-                throw new ArgumentException($"'{clip}' is not a clip name Astra takes (1-64 of A-Z a-z 0-9 _ . -, not starting with '.')", nameof(clip));
+            if (!CaptureInbox.ValidClipName(clip))
+                throw new ArgumentException($"'{clip}' is not a clip name Astra takes (1-{CaptureInbox.MaxClipName} of A-Z a-z 0-9 _ . -, not starting with '.')", nameof(clip));
             foreach (var c in Captures)
                 if (c.Param == param) throw new ArgumentException($"'{param}' is captured already (as '{c.Clip}')", nameof(param));
             Dictionary<string, string> map = null;

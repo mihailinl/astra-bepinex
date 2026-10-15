@@ -27,6 +27,7 @@
     <Il2CppInteropDir Condition="'$(Il2CppInteropDir)' == ''">$(MSBuildThisFileDirectory)../../unity/AstraTestbed/Build/il2cpp/BepInEx/interop</Il2CppInteropDir>
     <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
     <AstraInteropCore>$(Il2CppInteropDir)/UnityEngine.CoreModule.dll</AstraInteropCore>
+    <AstraInteropAnimation>$(Il2CppInteropDir)/UnityEngine.AnimationModule.dll</AstraInteropAnimation>
   </PropertyGroup>
   <!-- What a game built with code stripping may have removed, and the foundation can build without:
        a type's or member's name is in its assembly's metadata as plain ASCII, and nowhere in an
@@ -39,6 +40,13 @@
   <PropertyGroup Condition="Exists('$(AstraInteropCore)') And ('$([System.IO.File]::ReadAllText($(AstraInteropCore)).Contains(`beginCameraRendering`))' == 'False' Or '$([System.IO.File]::ReadAllText($(AstraInteropCore)).Contains(`endCameraRendering`))' == 'False' Or '$([System.IO.File]::ReadAllText($(AstraInteropCore)).Contains(`endContextRendering`))' == 'False')">
     <AstraStripped>$(AstraStripped) RenderPipelineManager's camera events (it never draws her in a URP or HDRP game);</AstraStripped>
     <DefineConstants>$(DefineConstants);ASTRA_NO_SRP_EVENTS</DefineConstants>
+  </PropertyGroup>
+  <!-- What a capture reads of the player's rig (PoseRig.Find): without any of it the plugin builds with
+       PoseRig.Find as a stub that fails the way a member stripped at run time does, so capturing goes
+       off in every game and nothing else does. -->
+  <PropertyGroup Condition="Exists('$(AstraInteropCore)') And Exists('$(AstraInteropAnimation)') And ('$([System.IO.File]::ReadAllText($(AstraInteropCore)).Contains(`get_bindposes`))' == 'False' Or '$([System.IO.File]::ReadAllText($(AstraInteropCore)).Contains(`get_bones`))' == 'False' Or '$([System.IO.File]::ReadAllText($(AstraInteropAnimation)).Contains(`GetBoneTransform`))' == 'False' Or '$([System.IO.File]::ReadAllText($(AstraInteropAnimation)).Contains(`get_isHuman`))' == 'False')">
+    <AstraStripped>$(AstraStripped) a skinned rig's bones or bind poses, or an Animator's humanoid bones (it never captures a game's animation);</AstraStripped>
+    <DefineConstants>$(DefineConstants);ASTRA_NO_CAPTURE_RIG</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.788" PrivateAssets="all" />

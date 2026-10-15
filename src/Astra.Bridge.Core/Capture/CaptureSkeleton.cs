@@ -77,6 +77,8 @@ namespace Astra.Bridge.Capture
         /// <summary>The bones the floor is measured from (feet and toes), and the two feet.</summary>
         readonly int[] floorBones;
         readonly int leftFoot, rightFoot;
+        Quat[] worldScratch;
+        Vec3[] facedScratch;
 
         /// <summary>The bone's index in <see cref="Bones"/>, or −1.</summary>
         public int IndexOf(string bone) => Array.IndexOf(Bones, bone);
@@ -263,8 +265,9 @@ namespace Astra.Bridge.Capture
             hipsOut = default;
             int n = Bones.Length;
             if (live == null || positions == null || local == null || live.Length < n || positions.Length < n || local.Length < n) return false;
-            var world = new Quat[n];
-            var faced = new Vec3[n];
+            // Scratch kept between calls (main thread only): no allocation per sample.
+            var world = worldScratch ??= new Quat[n];
+            var faced = facedScratch ??= new Vec3[n];
             for (int i = 0; i < n; i++)
             {
                 if (!live[i].IsFinite || !positions[i].IsFinite) return false;

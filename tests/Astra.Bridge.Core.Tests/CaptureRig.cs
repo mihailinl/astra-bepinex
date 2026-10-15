@@ -104,7 +104,10 @@ static class CaptureRig
         return p;
     }
 
-    /// <summary>A rig that holds still in its rest pose, or plays <see cref="Local"/> when set.</summary>
+    /// <summary>A rig that holds still in its rest pose, or plays <see cref="Local"/> when set,
+    /// under a root at <see cref="Root"/> (default: the world's origin). The body follows its root
+    /// unless <see cref="BodyStill"/>: then it stays put in the WORLD while the root turns (PEAK's
+    /// root turning with the camera while the scout holds the wall).</summary>
     public sealed class Sampler : IPoseSampler
     {
         readonly List<RestBone> rest;
@@ -118,14 +121,24 @@ static class CaptureRig
         public int Samples;
         public bool Gone;
         public Func<int, Quat[]> Local;
+        public Func<int, RootPose> Root;
+        public bool BodyStill;
 
-        public bool Sample(Quat[] live, Vec3[] positions)
+        public static readonly RootPose Origin = new RootPose(Quat.Identity, Vec3.Zero, new Vec3(1, 1, 1));
+
+        public bool Sample(Quat[] world, Vec3[] positions, out RootPose root)
         {
+            root = Root != null ? Root(Samples) : Origin;
             if (Gone) return false;
             var pose = Local != null ? Pose(Skeleton, rest, Local(Samples)) : RestRotations(Skeleton, rest);
-            Array.Copy(pose, live, pose.Length);
             var at = RestPositions(Skeleton, rest);
-            Array.Copy(at, positions, at.Length);
+            var frame = BodyStill ? Origin : root;
+            for (int i = 0; i < pose.Length; i++)
+            {
+                world[i] = frame.Rotation * pose[i];
+                var p = at[i];
+                positions[i] = frame.Position + frame.Rotation.Rotate(new Vec3(p.X * frame.Scale.X, p.Y * frame.Scale.Y, p.Z * frame.Scale.Z));
+            }
             Samples++;
             return true;
         }

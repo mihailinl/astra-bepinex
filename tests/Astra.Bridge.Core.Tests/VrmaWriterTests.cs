@@ -178,13 +178,11 @@ public class VrmaWriterTests
             Assert.True(clip.Add(f / 30.0, pose, new Vec3(0.2, 1.0, 0)));
         }
         Assert.InRange(clip.FaceForward(), 59.99, 60.01);
-        Quat Hips(int f) => new Quat(clip.Frames[f][0], clip.Frames[f][1], clip.Frames[f][2], clip.Frames[f][3]);
+        Quat Hips(int f) => clip.Rotation(f, 0);
         Assert.True(CaptureRig.Near(Hips(0), lean, 0.01), Hips(0).ToString());
         Assert.True(CaptureRig.Near(Hips(1), Quat.AngleAxis(30, up) * lean, 0.01), Hips(1).ToString());
-        var a = clip.Frames[0];
-        Assert.True(CaptureRig.Near(new Quat(a[4 * arm], a[4 * arm + 1], a[4 * arm + 2], a[4 * arm + 3]), CaptureRig.Arbitrary(7, 50), 0.01));
-        int n = sk.Bones.Length;
-        var hipsAt = new Vec3(a[4 * n], a[4 * n + 1], a[4 * n + 2]);
+        Assert.True(CaptureRig.Near(clip.Rotation(0, arm), CaptureRig.Arbitrary(7, 50), 0.01));
+        var hipsAt = clip.Hips(0);
         Assert.True(CaptureRig.Near(hipsAt, Quat.AngleAxis(-60, up).Rotate(new Vec3(0.2, 1.0, 0)), 1e-5), hipsAt.ToString());
     }
 

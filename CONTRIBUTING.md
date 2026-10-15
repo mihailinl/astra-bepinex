@@ -77,11 +77,11 @@ nuget.org and BepInEx's feed (`NuGet.Config`).
 
 ```bash
 dotnet build src/Astra.BepInEx5 -c Release        # the Mono foundation
-dotnet test tests/Astra.Bridge.Core.Tests         # 91 tests; the 2 EngineTests are skipped
+dotnet test tests/Astra.Bridge.Core.Tests         # 144 tests (2026-10-15); the 3 end-to-end ones are skipped
 ```
 
-The two `EngineTests` run against a real engine when `ASTRA_ENGINE` names an
-`astra-avatar-engine` binary built without its `daemon` feature. The engine Astra ships is
+The three end-to-end tests (`EngineTests`, `CaptureEngineTests`) run against a real engine when
+`ASTRA_ENGINE` names an `astra-avatar-engine` binary built without its `daemon` feature. The engine Astra ships is
 auth-gated and will not run them, so the maintainers do.
 
 ### Everything: `tools/pack.sh`
