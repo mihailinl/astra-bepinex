@@ -686,8 +686,9 @@ astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator);
   astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator, Bones, still: new[] { "AimJoint" });
   ```
 
-  Each frame its turn away from its bind pose (against its parent) is taken back out of every
-  captured bone below it, and after each take the log says how much was taken out:
+  "Still" means held at its BIND pose: each frame its turn away from it (against its parent) is
+  taken back out of every captured bone below it — so if the game's own animation moves that bone as
+  part of the move, that motion is taken out too, and after each take the log says how much was taken out:
   `capture: 'AimJoint' was held still in the take: up to 0° of its turn taken out of the 34 bones
   below it` (PEAK, climbing: its scouts do not aim AimJoint on a wall). A held bone is never one of
   the captured bones, so a captured bone the game ALSO turns with the camera keeps that turn (PEAK

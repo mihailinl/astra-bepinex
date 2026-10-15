@@ -49,8 +49,9 @@ namespace Astra.Sdk
         /// bind pose (its skinned meshes'), straightened to a T-pose.</param>
         /// <param name="still">Bones the game turns for its OWN reasons, which are not the move — by
         /// transform name under the Animator (PEAK: <c>"AimJoint"</c>, which turns the upper body with
-        /// where the player looks). Each frame such a bone's turn away from its bind pose is taken
-        /// back out of every captured bone below it; leaving it out of <paramref name="bones"/> alone
+        /// where the player looks). Each frame such a bone is held at its BIND pose: its turn away from
+        /// it is taken back out of every captured bone below it — any motion the game's own animation
+        /// gives it goes too; leaving it out of <paramref name="bones"/> alone
         /// does not do that (a capture reads world rotations). Not one of the captured bones. Null:
         /// none.</param>
         /// <exception cref="ArgumentException"><paramref name="param"/> is not declared as a bool, is

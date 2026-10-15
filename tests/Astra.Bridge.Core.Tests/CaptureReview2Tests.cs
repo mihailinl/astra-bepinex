@@ -118,6 +118,38 @@ public class CaptureReview2Tests : IDisposable
         Assert.Contains(log, l => l.Contains("more like it before"));
     }
 
+    /// <summary>Round 3 N1 (repro <c>slow_flicker_lines</c>: 90+ lines in 60 s): a parameter true
+    /// 0.35 s, false 0.25 s, for a minute — each cycle passes the lead-in and is too short to keep —
+    /// says "capturing" and "not kept" each at most once per 10 s: at most 14 lines in the minute.</summary>
+    [Fact]
+    public void a_slow_flicker_says_each_line_at_most_once_per_ten_seconds()
+    {
+        var r = AtOnce();
+        double start = now;
+        for (int i = 0; i < 3600; i++)
+        {
+            now += 1 / 60.0;
+            bool want = ((now - start) % 0.6) < 0.35;
+            r.Step(now, inbox, want, () => rig, j => { sent.Add(j); return true; });
+        }
+        Assert.Empty(sent);
+        Assert.InRange(log.Count, 2, 14);
+        Assert.Contains(log, l => l.StartsWith("capturing") && l.Contains("more like it before"));
+    }
+
+    /// <summary>Round 3 (repro <c>off_during_debounce_drops</c>): capture switched off during the
+    /// 0.2 s debounce at a take's end drops the take: no file, no offer.</summary>
+    [Fact]
+    public void capture_off_during_the_end_debounce_drops_the_take()
+    {
+        var r = AtOnce();
+        Play(new[] { r }, 3, true, inbox);
+        Play(new[] { r }, 0.1, false, inbox);
+        Play(new[] { r }, 0.5, false, null);
+        Assert.Empty(sent);
+        Assert.Empty(Files());
+    }
+
     /// <summary>R2-3: a false shorter than <see cref="CaptureRecorder.EndAfter"/> mid-climb (a
     /// one-frame hiccup of the game's flag) does not split the take: one file, the whole climb.</summary>
     [Fact]

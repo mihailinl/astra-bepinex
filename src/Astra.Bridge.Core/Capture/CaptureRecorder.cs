@@ -66,8 +66,8 @@ namespace Astra.Bridge.Capture
         /// one-frame false mid-climb does not split the take (nothing is sampled while it is false).</summary>
         public const double EndAfter = 0.2;
 
-        /// <summary>The least time between two "take not kept" lines, in seconds: a parameter that
-        /// flickers must not flood the game's log.</summary>
+        /// <summary>The least time between two "capturing" lines, and between two "not kept" lines, in
+        /// seconds: a parameter that flickers must not flood the game's log.</summary>
         public const double QuietLines = 10;
 
         /// <summary>The most takes one recorder offers in a game run.</summary>
@@ -92,8 +92,7 @@ namespace Astra.Bridge.Capture
         Quat frozen;             // the root's rotation at the take's first sample: the take's frame
         double firstAt, nextSample;
         double falseSince = double.NaN;        // the parameter turned false mid-take at; NaN = it is true
-        double lastQuiet = double.NegativeInfinity;
-        int quieted;                           // "not kept" lines held back since the last one
+        readonly Dictionary<string, (double At, int Held)> quiet = new Dictionary<string, (double, int)>(); // line kind → last said, held back since
         WriteJob job;            // the take being written / waiting to be offered
         volatile bool disposed;
 
@@ -273,7 +272,7 @@ namespace Astra.Bridge.Capture
                     {
                         frozen = root.Rotation;
                         firstAt = now;
-                        log($"capturing '{Clip}' while '{For}' is true (take {Takes + 1} of at most {MaxTakes}, {world.Length} bones, from {LeadIn:0.0} s in)");
+                        Quiet("start", now, $"capturing '{Clip}' while '{For}' is true (take {Takes + 1} of at most {MaxTakes}, {world.Length} bones, from {LeadIn:0.0} s in)");
                     }
                     RootPose.ToTakeFrame(frozen, root, world, worldAt, world.Length, live, at);
                     ok = take.Skeleton.Normalize(live, at, local, out hips);
@@ -301,7 +300,7 @@ namespace Astra.Bridge.Capture
             var clip = take;
             if (clip == null || clip.Count < 2 || clip.Duration < MinSeconds)
             {
-                Quiet(now, $"the take of '{Clip}' lasted {(clip?.Duration ?? 0):0.0} s past its lead-in (the least is {MinSeconds:0.0} s): not kept");
+                Quiet("short", now, $"the take of '{Clip}' lasted {(clip?.Duration ?? 0):0.0} s past its lead-in (the least is {MinSeconds:0.0} s): not kept");
                 Reset();
                 return;
             }
@@ -450,18 +449,19 @@ namespace Astra.Bridge.Capture
             sampler = null;
         }
 
-        /// <summary>Log <paramref name="line"/> unless one was said less than <see cref="QuietLines"/>
-        /// ago (then count it, and say how many were held back with the next).</summary>
-        void Quiet(double now, string line)
+        /// <summary>Log <paramref name="line"/> unless a line of its <paramref name="kind"/> was said less
+        /// than <see cref="QuietLines"/> ago (then count it, and say how many were held back with the
+        /// next one).</summary>
+        void Quiet(string kind, double now, string line)
         {
-            if (now - lastQuiet < QuietLines)
+            bool said = quiet.TryGetValue(kind, out var q);
+            if (said && now - q.At < QuietLines)
             {
-                quieted++;
+                quiet[kind] = (q.At, q.Held + 1);
                 return;
             }
-            lastQuiet = now;
-            log(quieted > 0 ? $"{line} (and {quieted} more like it before)" : line);
-            quieted = 0;
+            quiet[kind] = (now, 0);
+            log(q.Held > 0 ? $"{line} (and {q.Held} more like it before)" : line);
         }
 
         /// <summary>Log <paramref name="line"/> once per recorder.</summary>

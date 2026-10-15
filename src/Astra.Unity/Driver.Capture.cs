@@ -117,7 +117,7 @@ namespace Astra.Unity
                 bool sampling = c.Recorder.State == CaptureState.Recording && c.Recorder.Take != null && c.Recorder.Take.Count > 0;
                 c.Recorder.Step(now, inbox, want, c.Find, sendToLink);
                 bool samplingNow = c.Recorder.State == CaptureState.Recording && c.Recorder.Take != null && c.Recorder.Take.Count > 0;
-                if (sampling != samplingNow) HeldSaid(c, ended: sampling);
+                if (sampling != samplingNow) HeldSaid(c, written: sampling && c.Recorder.State == CaptureState.Writing);
                 // Read the rig ahead of the first take (a hierarchy walk and a mesh scan, once per
                 // Animator), not on the frame the player grabs the wall: at most once a second. An
                 // integration's own throw here (its Player() during a load) is said and retried in
@@ -139,14 +139,15 @@ namespace Astra.Unity
             if (captureTest > 0) ProbeOrder(capturers[0]);
         }
 
-        /// <summary>A take started (its first sample) or ended: what its held-still bones took out.</summary>
-        void HeldSaid(Capturer c, bool ended)
+        /// <summary>A take started (its first sample) or ended: what its held-still bones took out — said
+        /// only for a take that is being WRITTEN (one that was dropped or too short says nothing).</summary>
+        void HeldSaid(Capturer c, bool written)
         {
             var held = c.Rig?.Held;
             if (held == null) return;
             foreach (var h in held)
             {
-                if (ended) log.LogInfo($"capture: '{h.Name}' was held still in the take: up to {h.Most:0}° of its turn taken out of the {h.Below.Length} bones below it");
+                if (written) log.LogInfo($"capture: '{h.Name}' was held still in the take: up to {h.Most:0}° of its turn taken out of the {h.Below.Length} bones below it");
                 h.ResetMost();
             }
         }
