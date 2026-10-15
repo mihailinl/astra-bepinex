@@ -68,9 +68,10 @@ namespace Astra.Unity
         /// <summary>Whether she is shown at all (the toggle, General.Enabled, and a live link).</summary>
         public bool Show { get; set; } = true;
 
-        /// <summary>How many times she was drawn into a camera, and how many new pictures were taken
-        /// from Astra — running counts, for the "where is she" line.</summary>
-        public int Drawn, Pictures;
+        /// <summary>How many times she was drawn into a camera, how many new pictures were taken from
+        /// Astra, and how many draws were skipped because the picture held nothing of her (a cropped
+        /// frame with no rectangle: she is out of view) — running counts, for the "where is she" line.</summary>
+        public int Drawn, Pictures, Empty;
 
         /// <summary>The share of her newest picture that is not fully transparent, sampled every 5 s
         /// (−1 before the first): 0 means Astra drew an EMPTY picture — she is out of the view it was
@@ -712,8 +713,13 @@ namespace Astra.Unity
             // newest picture is a perspective camera's: reprojected through this camera's matrix it
             // would stand frozen as a cut-out over the menu. Asked before Pick, so no frame is uploaded.
             if (cam.orthographic) return false;
+            if (disposed || Ring == null || !Pick(cam, out var v, out var then)) return false;
             // A cropped frame with nothing of her in this view: no draw at all.
-            if (disposed || Ring == null || !Pick(cam, out var v, out var then) || v.Picture.Empty) return false;
+            if (v.Picture.Empty)
+            {
+                Empty++;
+                return false;
+            }
             b.Clear(); // nothing an earlier draw set (a kept depth) may leak into this one
 
             // The present view's axes. A mirror's camera renders the proper view flipped left to

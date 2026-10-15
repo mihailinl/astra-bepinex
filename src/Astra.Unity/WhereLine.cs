@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 using System.Runtime.CompilerServices;
+using Astra.Bridge;
 using Astra.Sdk;
 using BepInEx.Logging;
 using UnityEngine;
@@ -17,7 +18,7 @@ namespace Astra.Unity
     {
         float next;
         string last;
-        int drawnThen, picturesThen;
+        int drawnThen, picturesThen, emptyThen;
 
         /// <summary>Ten seconds have passed since the last <see cref="Check"/>.</summary>
         public bool Due => Time.unscaledTime > next;
@@ -31,8 +32,10 @@ namespace Astra.Unity
             next = Time.unscaledTime + 10f;
             if (compositor == null) return;
             int drawn = compositor.Drawn - drawnThen, pictures = compositor.Pictures - picturesThen;
+            int empty = compositor.Empty - emptyThen;
             drawnThen = compositor.Drawn;
             picturesThen = compositor.Pictures;
+            emptyThen = compositor.Empty;
             string state, where;
             if (!her.Placed)
             {
@@ -49,15 +52,12 @@ namespace Astra.Unity
             }
             float cover = compositor.Coverage;
             state += (drawn > 0 ? "+drawn" : "") + (pictures > 0 ? "+pictures" : "") + (compositor.Show ? "" : "+hidden")
-                + (cover == 0 ? "+empty" : "");
+                + (HerDiagnosis.IsEmpty(drawn, empty, cover) ? "+empty" : "");
             if (state == last) return;
             last = state;
             log.LogInfo($"her: {where}; in 10 s drawn {drawn} times from {pictures} new pictures" +
                 (cover >= 0 ? $", her picture {cover * 100:0.#}% covered" : "") +
-                (!compositor.Show ? " (hidden: toggled off, or Astra not connected)"
-                    : pictures == 0 ? " (no picture from Astra)"
-                    : drawn == 0 ? " (pictures arrive, none is drawn)"
-                    : cover == 0 ? " (Astra's picture is empty)" : ""));
+                HerDiagnosis.Why(compositor.Show, pictures, drawn, empty, cover));
         }
     }
 }
