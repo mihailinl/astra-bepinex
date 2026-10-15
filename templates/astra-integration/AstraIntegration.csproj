@@ -25,7 +25,7 @@
     <SteamAppId>0000000</SteamAppId>
     <!-- The Astra foundation release this builds against: its SDK, and (tools/fetch.sh) the
          foundation and BepInEx that astra-gi.zip bundles. A newer one: see tools/fetch.sh. -->
-    <AstraVersion>0.6.1</AstraVersion>
+    <AstraVersion>0.7.0</AstraVersion>
     <!-- packages.lock.json pins every package by content hash; commit it. CI restores locked. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>

@@ -4,7 +4,7 @@ id = "astra.integration-id"
 kind = "game-integration"
 version = "0.1.0"
 name = "Astra for STR_GAME"
-requires = [{ id = "astra.unity-foundation", range = ">=0.6.1, <1" }]   # = AstraVersion in the .csproj
+requires = [{ id = "astra.unity-foundation", range = ">=0.7.0, <1" }]   # = AstraVersion in the .csproj
 
 [target]
 game = { steam_appid = 0000000, product = "STR_GAME" }
