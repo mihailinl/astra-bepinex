@@ -26,6 +26,38 @@ namespace Astra.Bridge.Capture
         /// <summary>The take's length in seconds (its last sample's time).</summary>
         public double Duration => Times.Count == 0 ? 0 : Times[Times.Count - 1];
 
+        /// <summary>
+        /// Turn the whole take about +Y so that its FIRST frame's body (the hips' front) faces +Z, the
+        /// clip's front; returns the turn in degrees (0 when the body faces up or down, with no
+        /// front to take). The root's heading is the game's, not the body's: PEAK turns its scout's
+        /// root with the camera while the body faces the wall it climbs, so a take measured against
+        /// the root would climb sideways. A turn WITHIN the take stays in it.
+        /// </summary>
+        public double FaceForward()
+        {
+            if (Frames.Count == 0) return 0;
+            int n = Skeleton.Bones.Length;
+            var f0 = Frames[0];
+            var front = new Quat(f0[0], f0[1], f0[2], f0[3]).Normalized.Rotate(new Vec3(0, 0, 1));
+            var flat = new Vec3(front.X, 0, front.Z);
+            if (flat.Length < 0.2) return 0;
+            var forward = new Vec3(0, 0, 1);
+            var turn = flat.Z / flat.Length < -0.999999 ? Quat.AngleAxis(180, new Vec3(0, 1, 0)) : Quat.FromTo(flat, forward);
+            foreach (var f in Frames)
+            {
+                var q = (turn * new Quat(f[0], f[1], f[2], f[3])).Normalized;
+                f[0] = (float)q.X;
+                f[1] = (float)q.Y;
+                f[2] = (float)q.Z;
+                f[3] = (float)q.W;
+                var p = turn.Rotate(new Vec3(f[4 * n], f[4 * n + 1], f[4 * n + 2]));
+                f[4 * n] = (float)p.X;
+                f[4 * n + 1] = (float)p.Y;
+                f[4 * n + 2] = (float)p.Z;
+            }
+            return Quat.Angle(Quat.Identity, turn);
+        }
+
         /// <summary>Add one frame taken at <paramref name="time"/>. Ignored (false) unless the time is
         /// later than the last one's — a glTF animation's times only increase.</summary>
         public bool Add(double time, Quat[] local, Vec3 hips)

@@ -41,9 +41,10 @@ public class CaptureSkeletonTests
         Assert.Equal(-1, sk.Parents[0]);
         Assert.Equal(sk.IndexOf("chest"), sk.Parents[sk.IndexOf("leftShoulder")]); // no upperChest: the walk skips it
         var local = new Quat[sk.Bones.Length];
-        Assert.True(sk.Normalize(CaptureRig.RestRotations(sk, rest), CaptureRig.RestHips(rest), local, out var hips));
+        Assert.True(sk.Normalize(CaptureRig.RestRotations(sk, rest), CaptureRig.RestPositions(sk, rest), local, out var hips));
         foreach (var q in local) Assert.True(CaptureRig.Near(q, Quat.Identity), q.ToString());
         Assert.True(CaptureRig.Near(hips, new Vec3(0, 1.0, 0)), hips.ToString()); // the toes are the floor
+        Assert.True(CaptureRig.Near(sk.RestPositions[0], new Vec3(0, 1.0, 0)), "the rest hips too");
         Assert.Null(sk.StraightenedBone);
     }
 
@@ -57,7 +58,7 @@ public class CaptureSkeletonTests
         var want = Enumerable.Range(0, sk.Bones.Length).Select(i => CaptureRig.Arbitrary(100 + i, 80)).ToArray();
         var live = CaptureRig.Pose(sk, rest, want);
         var got = new Quat[sk.Bones.Length];
-        Assert.True(sk.Normalize(live, CaptureRig.RestHips(rest), got, out _));
+        Assert.True(sk.Normalize(live, CaptureRig.RestPositions(sk, rest), got, out _));
         for (int i = 0; i < want.Length; i++)
             Assert.True(CaptureRig.Near(got[i], want[i]), $"{sk.Bones[i]}: {got[i]} vs {want[i]}");
     }
@@ -81,7 +82,7 @@ public class CaptureSkeletonTests
         Assert.InRange(sk.Straightened, down - 0.01, down + 0.01);
 
         var local = new Quat[sk.Bones.Length];
-        Assert.True(sk.Normalize(CaptureRig.RestRotations(sk, rest), CaptureRig.RestHips(rest), local, out _));
+        Assert.True(sk.Normalize(CaptureRig.RestRotations(sk, rest), CaptureRig.RestPositions(sk, rest), local, out _));
         int upper = sk.IndexOf("leftUpperArm");
         // Her T-pose arm (−X) turned by the captured rotations points where the game's arm points.
         var world = Quat.Identity;
@@ -100,10 +101,46 @@ public class CaptureSkeletonTests
         var rest = CaptureRig.Rest(180);
         var sk = CaptureRig.Skeleton(rest);
         var local = new Quat[sk.Bones.Length];
-        var hips = CaptureRig.RestHips(rest);
-        Assert.True(sk.Normalize(CaptureRig.RestRotations(sk, rest), hips + new Vec3(0, 0, -0.5), local, out var moved));
+        var at = CaptureRig.RestPositions(sk, rest);
+        at[0] = at[0] + new Vec3(0, 0, -0.5); // the hips lean out toward ITS front
+        Assert.True(sk.Normalize(CaptureRig.RestRotations(sk, rest), at, local, out var moved));
         foreach (var q in local) Assert.True(CaptureRig.Near(q, Quat.Identity), q.ToString());
         Assert.True(CaptureRig.Near(moved, new Vec3(0, 1.0, 0.5)), moved.ToString());
+    }
+
+    /// <summary>A hand is never "straightened" toward its fingers' bases: that line is not the hand's
+    /// axis (PEAK's scouts bend it 66° off), and swinging the hand along it would bend her wrist in
+    /// every frame of the clip.</summary>
+    [Fact]
+    public void a_hand_is_not_swung_toward_its_fingers()
+    {
+        var rest = CaptureRig.Rest(0, (bone, p) => bone == "leftMiddleProximal" ? p + new Vec3(0, -0.08, 0.05) : p);
+        var sk = CaptureRig.Skeleton(rest);
+        Assert.Null(sk.StraightenedBone);
+        var local = new Quat[sk.Bones.Length];
+        Assert.True(sk.Normalize(CaptureRig.RestRotations(sk, rest), CaptureRig.RestPositions(sk, rest), local, out _));
+        Assert.True(CaptureRig.Near(local[sk.IndexOf("leftHand")], Quat.Identity));
+    }
+
+    /// <summary>The hips are placed against the FEET, never the root: a live rig that stands
+    /// elsewhere against its root than its bind pose did (PEAK's scout: 2.9 units below) still
+    /// stands at its rest height; one that crouches has its hips lower by the crouch; one that leaves
+    /// the ground with its feet (a jump) does not rise — the clip plays in place.</summary>
+    [Fact]
+    public void the_hips_stand_on_the_feet_wherever_the_root_is()
+    {
+        var rest = CaptureRig.Rest();
+        var sk = CaptureRig.Skeleton(rest);
+        var rot = CaptureRig.RestRotations(sk, rest);
+        var local = new Quat[sk.Bones.Length];
+        Assert.True(sk.Normalize(rot, CaptureRig.RestPositions(sk, rest, new Vec3(0.3, -2.86, 0.7)), local, out var hips));
+        Assert.True(CaptureRig.Near(hips, new Vec3(0, 1.0, 0)), $"elsewhere against the root: {hips}");
+        var crouch = CaptureRig.RestPositions(sk, rest);
+        crouch[0] = crouch[0] + new Vec3(0, -0.3, 0);
+        Assert.True(sk.Normalize(rot, crouch, local, out hips));
+        Assert.True(CaptureRig.Near(hips, new Vec3(0, 0.7, 0)), $"crouched: {hips}");
+        Assert.True(sk.Normalize(rot, CaptureRig.RestPositions(sk, rest, new Vec3(0, 0.5, 0)), local, out hips));
+        Assert.True(CaptureRig.Near(hips, new Vec3(0, 1.0, 0)), $"in the air: {hips}");
     }
 
     /// <summary>A rig that cannot be a VRM humanoid is refused with the reason: a required bone

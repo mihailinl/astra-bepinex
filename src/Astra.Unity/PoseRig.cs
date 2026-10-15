@@ -18,8 +18,9 @@ namespace Astra.Unity
     /// BIND pose of the character's skinned meshes (a bone's <c>bindposes</c> entry, or, when the
     /// animated bone is not itself skinned, the skinned bone of the same name — a game that drives a
     /// ragdoll copy of its animated rig skins the copy), brought into the Animator's frame. Every
-    /// position and rotation is relative to the Animator's transform, so the character's own travel
-    /// through the world is not in the clip: it plays in place.
+    /// rotation is relative to the Animator's transform, and the hips are placed against the feet
+    /// (<see cref="CaptureSkeleton.Normalize"/>), so the character's own travel through the world is
+    /// not in the clip: it plays in place.
     /// </para>
     /// </summary>
     sealed class PoseRig : IPoseSampler
@@ -82,6 +83,7 @@ namespace Astra.Unity
             // not the same managed object for the same native one.
             var byBone = new Dictionary<int, Matrix4x4>();
             var byName = new Dictionary<string, Matrix4x4>();
+            var meshOf = new Dictionary<string, string>(); // a bone's name → the mesh its bind pose came from
             var top = animator.transform.root;
             int meshes = 0;
             foreach (var smr in top.GetComponentsInChildren<SkinnedMeshRenderer>(true))
@@ -103,7 +105,11 @@ namespace Astra.Unity
                     var world = meshToWorld * bind[i].inverse;
                     int id = b.GetInstanceID();
                     if (!byBone.ContainsKey(id)) byBone[id] = world;
-                    if (!byName.ContainsKey(b.name)) byName[b.name] = world;
+                    if (!byName.ContainsKey(b.name))
+                    {
+                        byName[b.name] = world;
+                        meshOf[b.name] = smr.name;
+                    }
                 }
             }
 
@@ -111,9 +117,13 @@ namespace Astra.Unity
             var rest = new List<RestBone>();
             var order = new List<Transform>();
             var noBind = new List<string>();
+            int itself = 0;
+            var named = new HashSet<string>();
             foreach (var kv in map)
             {
-                if (!byBone.TryGetValue(kv.Value.GetInstanceID(), out var world) && !byName.TryGetValue(kv.Value.name, out world))
+                if (byBone.TryGetValue(kv.Value.GetInstanceID(), out var world)) itself++;
+                else if (byName.TryGetValue(kv.Value.name, out world)) named.Add(meshOf[kv.Value.name]);
+                else
                 {
                     noBind.Add($"{kv.Key} ('{kv.Value.name}')");
                     continue;
@@ -133,6 +143,8 @@ namespace Astra.Unity
             var ordered = new Transform[skeleton.Bones.Length];
             for (int i = 0; i < ordered.Length; i++) ordered[i] = order[rest.FindIndex(r => r.Name == skeleton.Bones[i])];
             report = $"{skeleton.Bones.Length} bones of '{animator.name}' ({(names == null ? "humanoid" : "named by the integration")}), rest from {meshes} skinned meshes"
+                + $" ({itself} skinned themselves" + (named.Count > 0 ? $", {skeleton.Bones.Length - itself} through a skinned bone of their name in {string.Join(", ", named)})" : ")")
+                + $", rest hips {skeleton.RestPositions[0].Y:0.###} above the feet"
                 + (skeleton.StraightenedBone != null ? $", straightened to a T-pose (most: {skeleton.StraightenedBone} by {skeleton.Straightened:0}°)" : "")
                 + (noBind.Count > 0 ? $"; left out (no bind pose): {string.Join(", ", noBind)}" : "");
             why = null;
@@ -148,9 +160,8 @@ namespace Astra.Unity
             return true;
         }
 
-        public bool Sample(Quat[] live, out Vec3 hips)
+        public bool Sample(Quat[] live, Vec3[] positions)
         {
-            hips = default;
             if (root == null) return false;
             var inv = Quaternion.Inverse(root.rotation);
             for (int i = 0; i < bones.Length; i++)
@@ -158,9 +169,30 @@ namespace Astra.Unity
                 var b = bones[i];
                 if (b == null) return false;
                 live[i] = Q(inv * b.rotation);
+                positions[i] = V(root.InverseTransformPoint(b.position));
             }
-            hips = V(root.InverseTransformPoint(bones[0].position));
             return true;
+        }
+
+        /// <summary>Where the hips and feet are NOW against the rest, in the clip's frame — a test aid's
+        /// diagnostic line (<c>ASTRA_CAPTURE_TEST</c>).</summary>
+        public string DescribeNow()
+        {
+            var live = new Quat[bones.Length];
+            var positions = new Vec3[bones.Length];
+            if (!Sample(live, positions)) return "no pose now";
+            var local = new Quat[bones.Length];
+            if (!Skeleton.Normalize(live, positions, local, out var clipHips)) return "no finite pose now";
+            string Foot(string bone)
+            {
+                int i = Skeleton.IndexOf(bone);
+                if (i < 0) return "-";
+                var p = root.InverseTransformPoint(bones[i].position);
+                return $"({p.x:0.##}, {p.y:0.##}, {p.z:0.##})";
+            }
+            var h = root.InverseTransformPoint(bones[0].position);
+            return $"hips now ({h.x:0.##}, {h.y:0.##}, {h.z:0.##}) in '{root.name}', feet {Foot("leftFoot")} {Foot("rightFoot")}; "
+                + $"in the clip: hips ({clipHips.X:0.##}, {clipHips.Y:0.##}, {clipHips.Z:0.##}), rest ({Skeleton.RestPositions[0].X:0.##}, {Skeleton.RestPositions[0].Y:0.##}, {Skeleton.RestPositions[0].Z:0.##})";
         }
 
         /// <summary>The first transform named <paramref name="name"/> under <paramref name="t"/>

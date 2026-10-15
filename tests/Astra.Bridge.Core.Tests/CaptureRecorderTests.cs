@@ -84,6 +84,24 @@ public class CaptureRecorderTests : IDisposable
         Assert.Equal(1, r.Takes);
     }
 
+    /// <summary>A take whose body faced away from its root at its start is written facing front
+    /// (<see cref="CapturedClip.FaceForward"/>): the file's first hips key has no turn about +Y.</summary>
+    [Fact]
+    public void a_take_is_written_facing_front()
+    {
+        var r = Recorder();
+        rig.Local = k => Enumerable.Range(0, rig.Skeleton.Bones.Length)
+            .Select(i => i == 0 ? Quat.AngleAxis(40 + k, new Vec3(0, 1, 0)) : Quat.Identity).ToArray();
+        Play(r, 2, true);
+        Play(r, 0.1, false);
+        var (json, bin) = VrmaWriterTests.ReadGlb(File.ReadAllBytes(Path.Combine(inbox, Assert.Single(Files()))));
+        var view = json.GetProperty("bufferViews")[json.GetProperty("accessors")[1].GetProperty("bufferView").GetInt32()];
+        int at = view.GetProperty("byteOffset").GetInt32();
+        var first = new Quat(BitConverter.ToSingle(bin, at), BitConverter.ToSingle(bin, at + 4), BitConverter.ToSingle(bin, at + 8), BitConverter.ToSingle(bin, at + 12));
+        Assert.True(CaptureRig.Near(first, Quat.Identity, 0.05), first.ToString());
+        Assert.Contains(log, l => l.Contains("turned to face front"));
+    }
+
     /// <summary>A take shorter than <see cref="CaptureRecorder.MinSeconds"/> (a grab at a ledge) is
     /// not kept, offered or counted.</summary>
     [Fact]

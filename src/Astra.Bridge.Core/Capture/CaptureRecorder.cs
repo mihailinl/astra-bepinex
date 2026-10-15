@@ -13,10 +13,10 @@ namespace Astra.Bridge.Capture
         /// <summary>The rig's skeleton (built once, from its rest pose).</summary>
         CaptureSkeleton Skeleton { get; }
 
-        /// <summary>This frame's pose: each bone's rotation relative to the character's root (Unity's
-        /// axes, <see cref="CaptureSkeleton.Bones"/>' order) and the hips' position relative to it.
-        /// False when there is no pose now (the character is gone).</summary>
-        bool Sample(Quat[] live, out Vec3 hips);
+        /// <summary>This frame's pose: each bone's rotation and position relative to the character's
+        /// root (Unity's axes, <see cref="CaptureSkeleton.Bones"/>' order). False when there is no pose
+        /// now (the character is gone).</summary>
+        bool Sample(Quat[] live, Vec3[] positions);
     }
 
     /// <summary>What a <see cref="CaptureRecorder"/> is doing.</summary>
@@ -83,6 +83,7 @@ namespace Astra.Bridge.Capture
         IPoseSampler sampler;
         CapturedClip take;
         Quat[] live, local;
+        Vec3[] positions;
         double started, nextSample;
         string file, path;       // the take being written / ready: its name, its full path
         volatile int written;    // 0 = still writing, 1 = done, 2 = failed (writeError says why)
@@ -263,6 +264,7 @@ namespace Astra.Bridge.Capture
             {
                 live = new Quat[n];
                 local = new Quat[n];
+                positions = new Vec3[n];
             }
             take = new CapturedClip(s.Skeleton);
             started = now;
@@ -278,7 +280,7 @@ namespace Astra.Bridge.Capture
             Vec3 hips = default;
             try
             {
-                ok = sampler.Sample(live, out var h) && take.Skeleton.Normalize(live, h, local, out hips);
+                ok = sampler.Sample(live, positions) && take.Skeleton.Normalize(live, positions, local, out hips);
             }
             catch (Exception e)
             {
@@ -306,6 +308,8 @@ namespace Astra.Bridge.Capture
                 Reset();
                 return;
             }
+            double turned = clip.FaceForward();
+            if (turned > 1) log($"the take of '{Clip}' faced {turned:0}° off its character's root at its start: turned to face front");
             string name = NewFileName();
             if (name == null)
             {

@@ -632,14 +632,18 @@ astra.CaptureWhile("climbing", "climb", () => MyPlayer.Animator);
   most three takes are offered per game run, and a take the engine refuses (`clip_refused`, printed
   once in the log) is removed from the inbox again.
 - **What is captured.** Each humanoid bone's rotation against the rig's REST pose, turned into the
-  VRM normalized pose (the same file a VRM animation tool writes), and the hips' height. Everything is
-  relative to the Animator's transform, so the clip plays in place: the character's travel through
-  the world is the game's, not the clip's. Eyes and jaw are left out: her gaze and her mouth are
-  her own.
-- **The rest pose** is the bind pose of the character's skinned meshes, straightened to a T-pose
-  (arms out, legs down), so a rig bound in an A-pose does not raise her arms by its angle. The log
-  says what it found: `capture: 52 bones of 'Scout' (named by the integration), rest from 3 skinned
-  meshes, straightened to a T-pose (most: leftUpperArm by 38°)`.
+  VRM normalized pose (the same file a VRM animation tool writes), and where the hips are against the
+  FEET (above the lowest foot, across from their midpoint). The clip plays in place: the character's
+  travel through the world, and its root's heading, are the game's. Each take is turned so the body
+  faces front at its start (PEAK turns its scout's root with the camera while the body faces the
+  wall); a turn within the take stays. Eyes and jaw are left out: her gaze and her mouth are her own.
+- **The rest pose** is the bind pose of the character's skinned meshes, with the arms and legs swung
+  straight into a T-pose, so a rig bound in an A-pose does not raise her arms by its angle (the
+  hands are not swung: the line to the fingers is not a hand's axis). Only the rest's rotations and
+  the distances between bones are used, so it does not matter where the bind pose sat against the
+  root. The log says what it found: `capture: 45 bones of 'Scout' (named by the integration), rest
+  from 13 skinned meshes (45 skinned themselves), rest hips 1.886 above the feet, straightened to a
+  T-pose (most: rightUpperLeg by 4°)`.
 - **A Generic rig** (an Animator with no Avatar: `isHuman` is false) has no humanoid bones Unity
   knows. Name them, by transform name under the Animator:
 

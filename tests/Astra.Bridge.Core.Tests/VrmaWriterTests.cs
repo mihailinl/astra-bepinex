@@ -158,6 +158,36 @@ public class VrmaWriterTests
         Assert.InRange(bytes.Length, 1, CaptureRecorder.MaxBytes / 8);
     }
 
+    /// <summary>A take is turned so its FIRST frame's body faces the clip's front (+Z): a body that
+    /// faced 60° off its root (PEAK's scout faces the wall, its root the camera) climbs facing front,
+    /// a turn within the take stays (60° → 90° is still 30° of turning), the hips' place turns with
+    /// it, and the limbs — relative to the hips — do not change.</summary>
+    [Fact]
+    public void a_take_is_turned_to_face_front_at_its_start()
+    {
+        var sk = CaptureRig.Skeleton();
+        var clip = new CapturedClip(sk);
+        var up = new Vec3(0, 1, 0);
+        var lean = Quat.AngleAxis(20, new Vec3(1, 0, 0)); // leaning into the wall: kept
+        int arm = sk.IndexOf("leftUpperArm");
+        for (int f = 0; f < 2; f++)
+        {
+            var pose = Enumerable.Repeat(Quat.Identity, sk.Bones.Length).ToArray();
+            pose[0] = Quat.AngleAxis(60 + 30 * f, up) * lean;
+            pose[arm] = CaptureRig.Arbitrary(7, 50);
+            Assert.True(clip.Add(f / 30.0, pose, new Vec3(0.2, 1.0, 0)));
+        }
+        Assert.InRange(clip.FaceForward(), 59.99, 60.01);
+        Quat Hips(int f) => new Quat(clip.Frames[f][0], clip.Frames[f][1], clip.Frames[f][2], clip.Frames[f][3]);
+        Assert.True(CaptureRig.Near(Hips(0), lean, 0.01), Hips(0).ToString());
+        Assert.True(CaptureRig.Near(Hips(1), Quat.AngleAxis(30, up) * lean, 0.01), Hips(1).ToString());
+        var a = clip.Frames[0];
+        Assert.True(CaptureRig.Near(new Quat(a[4 * arm], a[4 * arm + 1], a[4 * arm + 2], a[4 * arm + 3]), CaptureRig.Arbitrary(7, 50), 0.01));
+        int n = sk.Bones.Length;
+        var hipsAt = new Vec3(a[4 * n], a[4 * n + 1], a[4 * n + 2]);
+        Assert.True(CaptureRig.Near(hipsAt, Quat.AngleAxis(-60, up).Rotate(new Vec3(0.2, 1.0, 0)), 1e-5), hipsAt.ToString());
+    }
+
     /// <summary>A time that does not increase is never added (a glTF animation's times only
     /// increase), and a clip of one frame is not a clip.</summary>
     [Fact]

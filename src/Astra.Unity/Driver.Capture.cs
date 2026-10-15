@@ -115,6 +115,7 @@ namespace Astra.Unity
             }
             c.LastWhy = null;
             log.LogInfo("capture: " + report);
+            if (captureTest > 0) log.LogInfo("capture: " + c.Rig.DescribeNow());
             return c.Rig;
         }
 

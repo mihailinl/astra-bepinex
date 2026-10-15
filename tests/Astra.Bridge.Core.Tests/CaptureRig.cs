@@ -95,6 +95,15 @@ static class CaptureRig
 
     public static Vec3 RestHips(List<RestBone> rest) => rest.Find(b => b.Name == "hips").Position;
 
+    /// <summary>The rest POSITIONS, in <paramref name="sk"/>'s order, moved by <paramref name="offset"/>
+    /// (where the live rig stands against its root need not be where its bind pose was).</summary>
+    public static Vec3[] RestPositions(CaptureSkeleton sk, List<RestBone> rest, Vec3 offset = default)
+    {
+        var p = new Vec3[sk.Bones.Length];
+        for (int i = 0; i < p.Length; i++) p[i] = rest.Find(b => b.Name == sk.Bones[i]).Position + offset;
+        return p;
+    }
+
     /// <summary>A rig that holds still in its rest pose, or plays <see cref="Local"/> when set.</summary>
     public sealed class Sampler : IPoseSampler
     {
@@ -110,12 +119,13 @@ static class CaptureRig
         public bool Gone;
         public Func<int, Quat[]> Local;
 
-        public bool Sample(Quat[] live, out Vec3 hips)
+        public bool Sample(Quat[] live, Vec3[] positions)
         {
-            hips = RestHips(rest);
             if (Gone) return false;
             var pose = Local != null ? Pose(Skeleton, rest, Local(Samples)) : RestRotations(Skeleton, rest);
             Array.Copy(pose, live, pose.Length);
+            var at = RestPositions(Skeleton, rest);
+            Array.Copy(at, positions, at.Length);
             Samples++;
             return true;
         }

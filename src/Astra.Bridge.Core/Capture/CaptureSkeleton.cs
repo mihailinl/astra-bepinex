@@ -38,9 +38,17 @@ namespace Astra.Bridge.Capture
     /// <para>
     /// The rest is made a T-pose first, so a rig bound in an A-pose does not raise her arms by its
     /// angle: the facing is turned to +Z (from the side-to-side axis of the legs), and the arms and
-    /// legs are swung straight (upper arm, forearm and hand along ∓X, thigh and shin down), each with
-    /// what hangs below it. The clip's origin is the floor under the rest hips, so its rest hips
-    /// height is the hips above the feet whatever the root's own origin.
+    /// legs are swung straight (upper arm and forearm along ∓X, thigh and shin down), each with
+    /// what hangs below it.
+    /// </para>
+    /// <para>
+    /// The hips are placed IN PLACE, against the feet, never against the root: each frame's hips are
+    /// measured from the lowest foot (or toe) up and from the feet's midpoint across, and the rest
+    /// skeleton the same way. A root's own origin can be anywhere (PEAK's is above its scout's hips),
+    /// and a skinned mesh's bind pose need not sit where the live rig does relative to that root — so
+    /// a rest taken from the bind pose agrees with the live rig only in its ROTATIONS and in the
+    /// distances between bones, which is all this uses. The character's travel through the world is
+    /// the game's, not the clip's.
     /// </para>
     /// </summary>
     public sealed class CaptureSkeleton
@@ -54,7 +62,7 @@ namespace Astra.Bridge.Capture
         public readonly int[] Parents;
 
         /// <summary>Each bone's T-pose position, in the clip's frame (Unity's axes): the floor under
-        /// the rest hips is the origin, +Z the body's front.</summary>
+        /// the feet's midpoint is the origin, +Z the body's front.</summary>
         public readonly Vec3[] RestPositions;
 
         /// <summary>The turn about +Y that faces the rig to +Z (applied to every live frame).</summary>
@@ -66,17 +74,28 @@ namespace Astra.Bridge.Capture
         public readonly string StraightenedBone;
 
         readonly Quat[] restInverse;
-        readonly Vec3 origin;
+        /// <summary>The bones the floor is measured from (feet and toes), and the two feet.</summary>
+        readonly int[] floorBones;
+        readonly int leftFoot, rightFoot;
 
         /// <summary>The bone's index in <see cref="Bones"/>, or −1.</summary>
         public int IndexOf(string bone) => Array.IndexOf(Bones, bone);
 
-        CaptureSkeleton(string[] bones, int[] parents, Quat[] rest, Vec3[] positions, Quat facing, Vec3 origin, double straightened, string straightenedBone)
+        CaptureSkeleton(string[] bones, int[] parents, Quat[] rest, Vec3[] positions, Quat facing, double straightened, string straightenedBone)
         {
             Bones = bones;
             Parents = parents;
             Facing = facing;
-            this.origin = origin;
+            var floor = new List<int>();
+            foreach (var f in FloorBones)
+            {
+                int i = Array.IndexOf(bones, f);
+                if (i >= 0) floor.Add(i);
+            }
+            floorBones = floor.ToArray();
+            leftFoot = Array.IndexOf(bones, "leftFoot");
+            rightFoot = Array.IndexOf(bones, "rightFoot");
+            var origin = Ground(positions);
             Straightened = straightened;
             StraightenedBone = straightenedBone;
             restInverse = new Quat[rest.Length];
@@ -88,16 +107,28 @@ namespace Astra.Bridge.Capture
             }
         }
 
+        static readonly string[] FloorBones = { "leftFoot", "rightFoot", "leftToes", "rightToes" };
+
+        /// <summary>The floor under <paramref name="pos"/>'s feet: the feet's midpoint across, the lowest
+        /// foot or toe's height.</summary>
+        Vec3 Ground(Vec3[] pos)
+        {
+            double floor = double.MaxValue;
+            foreach (int i in floorBones) floor = Math.Min(floor, pos[i].Y);
+            var mid = (pos[leftFoot] + pos[rightFoot]) * 0.5;
+            return new Vec3(mid.X, floor, mid.Z);
+        }
+
         /// <summary>The direction each straightened bone points at in a T-pose (Unity's axes, facing
-        /// +Z: the character's left is −X), and the bone(s) whose position gives its own direction.</summary>
+        /// +Z: the character's left is −X), and the bone(s) whose position gives its own direction.
+        /// Not the hands: a hand's line to its fingers' bases is not its axis (PEAK's scouts bend the
+        /// fingers' base 66° off the hand), so "straightening" one would bend her wrist.</summary>
         static readonly (string Bone, Vec3 Target, string[] Toward)[] Straighten =
         {
             ("leftUpperArm", new Vec3(-1, 0, 0), new[] { "leftLowerArm" }),
             ("leftLowerArm", new Vec3(-1, 0, 0), new[] { "leftHand" }),
-            ("leftHand", new Vec3(-1, 0, 0), new[] { "leftMiddleProximal", "leftIndexProximal", "leftRingProximal" }),
             ("rightUpperArm", new Vec3(1, 0, 0), new[] { "rightLowerArm" }),
             ("rightLowerArm", new Vec3(1, 0, 0), new[] { "rightHand" }),
-            ("rightHand", new Vec3(1, 0, 0), new[] { "rightMiddleProximal", "rightIndexProximal", "rightRingProximal" }),
             ("leftUpperLeg", new Vec3(0, -1, 0), new[] { "leftLowerLeg" }),
             ("leftLowerLeg", new Vec3(0, -1, 0), new[] { "leftFoot" }),
             ("rightUpperLeg", new Vec3(0, -1, 0), new[] { "rightLowerLeg" }),
@@ -189,21 +220,14 @@ namespace Astra.Bridge.Capture
                 }
             }
 
-            // The clip's origin: the floor (the lowest foot or toe) under the rest hips.
-            double floor = double.MaxValue;
-            foreach (var f in new[] { "leftFoot", "rightFoot", "leftToes", "rightToes" })
-            {
-                int i = names.IndexOf(f);
-                if (i >= 0) floor = Math.Min(floor, pos[i].Y);
-            }
-            var origin = new Vec3(pos[0].X, floor, pos[0].Z);
-            if (!(pos[0].Y - floor > 1e-3))
+            var sk = new CaptureSkeleton(names.ToArray(), parents, rot, pos, facing, most > 1 ? most : 0, most > 1 ? mostBone : null);
+            if (!(sk.RestPositions[0].Y > 1e-3))
             {
                 why = "its hips are not above its feet at rest";
                 return null;
             }
             why = null;
-            return new CaptureSkeleton(names.ToArray(), parents, rot, pos, facing, origin, most > 1 ? most : 0, most > 1 ? mostBone : null);
+            return sk;
         }
 
         /// <summary>Does bone <paramref name="d"/> hang below bone <paramref name="b"/>?</summary>
@@ -227,25 +251,29 @@ namespace Astra.Bridge.Capture
         }
 
         /// <summary>
-        /// One frame of the game's pose → VRM normalized local rotations. <paramref name="live"/> holds
-        /// each bone's rotation relative to the character's root (Unity's axes), in
-        /// <see cref="Bones"/>' order; <paramref name="hips"/> the hips' position relative to that root.
-        /// Writes <paramref name="local"/> (one per bone) and returns the hips' position in the clip's
-        /// frame (Unity's axes). False, writing nothing, when a number is not finite.
+        /// One frame of the game's pose → VRM normalized local rotations and the hips' place.
+        /// <paramref name="live"/> holds each bone's rotation relative to the character's root (Unity's
+        /// axes), <paramref name="positions"/> each bone's position relative to it, both in
+        /// <see cref="Bones"/>' order. Writes <paramref name="local"/> (one per bone) and returns the
+        /// hips' position in the clip's frame (Unity's axes): above the lowest foot, across from the
+        /// feet's midpoint. False, writing nothing, when a number is not finite.
         /// </summary>
-        public bool Normalize(Quat[] live, Vec3 hips, Quat[] local, out Vec3 hipsOut)
+        public bool Normalize(Quat[] live, Vec3[] positions, Quat[] local, out Vec3 hipsOut)
         {
             hipsOut = default;
-            if (live == null || local == null || live.Length < Bones.Length || local.Length < Bones.Length || !hips.IsFinite) return false;
-            var world = new Quat[Bones.Length];
-            for (int i = 0; i < Bones.Length; i++)
+            int n = Bones.Length;
+            if (live == null || positions == null || local == null || live.Length < n || positions.Length < n || local.Length < n) return false;
+            var world = new Quat[n];
+            var faced = new Vec3[n];
+            for (int i = 0; i < n; i++)
             {
-                if (!live[i].IsFinite) return false;
+                if (!live[i].IsFinite || !positions[i].IsFinite) return false;
                 world[i] = (Facing * live[i].Normalized * restInverse[i]).Normalized;
+                faced[i] = Facing.Rotate(positions[i]);
             }
-            for (int i = 0; i < Bones.Length; i++)
+            for (int i = 0; i < n; i++)
                 local[i] = Parents[i] < 0 ? world[i] : (world[Parents[i]].Inverse * world[i]).Normalized;
-            hipsOut = Facing.Rotate(hips) - origin;
+            hipsOut = faced[0] - Ground(faced);
             return true;
         }
     }
