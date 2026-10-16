@@ -68,7 +68,7 @@ namespace Astra.Unity
         /// <summary>Bind the HDRP adapter's <c>Ambient</c> (by reflection).</summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static void BindHdrp() =>
-            HdrpProbe.Read = Adapters.Method<Func<Camera, SphericalHarmonicsL2>>("Astra.Hdrp", "Astra.Unity.Hdrp", "Ambient");
+            HdrpProbe.Read = Adapters.Method<Func<Camera, SphericalHarmonicsL2>>("Astra.Hdrp", "Astra.Unity.HdrpLight", "Ambient");
 
         /// <summary>A probe's light on a surface facing each of <paramref name="directions"/> (what the
         /// game's own shaders get from it).</summary>

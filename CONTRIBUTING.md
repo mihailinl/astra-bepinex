@@ -77,7 +77,7 @@ nuget.org and BepInEx's feed (`NuGet.Config`).
 
 ```bash
 dotnet build src/Astra.BepInEx5 -c Release        # the Mono foundation
-dotnet test tests/Astra.Bridge.Core.Tests         # 144 tests (2026-10-15); the 3 end-to-end ones are skipped
+dotnet test tests/Astra.Bridge.Core.Tests         # 162 tests (2026-10-16); the 3 end-to-end ones are skipped
 ```
 
 The three end-to-end tests (`EngineTests`, `CaptureEngineTests`) run against a real engine when
@@ -111,7 +111,7 @@ re-packing one, delete `~/.nuget/packages/astra.unity.sdk/<version>-dev` before 
 
 | for | set | point it at | without it |
 |---|---|---|---|
-| the URP 17 adapter | `URP17_REF_DIR` | a Unity 6 URP game's `<Game>_Data/Managed`, or a Unity 6 URP project's `Library/ScriptAssemblies`. The default is the testbed's `unity/AstraTestbed/Library/ScriptAssemblies`, which exists once you open or build the testbed. | Unity 6 URP games get her after the camera instead of inside its render |
+| the URP 17 adapter | `URP17_REF_DIR` | a Unity 6 URP game's `<Game>_Data/Managed`, or a Unity 6 URP project's `Library/ScriptAssemblies`. The default is the testbed's `unity/AstraTestbed/Library/ScriptAssemblies`, which exists once you open or build the testbed. A release uses the OLDEST Unity 6 line at hand (6000.0: Content Warning's) and is checked against the newest ([below](#releasing)). | Unity 6 URP games get her after the camera instead of inside its render |
 | the URP 14 adapter | `URP14_REF_DIR` | a Unity 2022.3 URP game's `<Game>_Data/Managed` | URP 2022-2023 games get her over the finished frame |
 | the HDRP adapter | `HDRP_REF_DIR` | an HDRP game's `<Game>_Data/Managed`, or an HDRP project's `Library/ScriptAssemblies` | HDRP games get her without a depth test |
 | the IL2CPP plugin | the first argument of `pack.sh`, or `IL2CPP_INTEROP_DIR` | a `BepInEx/interop` folder that BepInEx 6 generated for an IL2CPP game (with Astra's launcher: `~/.local/share/astra/games/<steam appid>/BepInEx/interop`). The default is the testbed's `unity/AstraTestbed/Build/il2cpp/BepInEx/interop`, which exists once BepInEx 6 has started the testbed's IL2CPP build. See [the interop it needs](#which-interop-the-il2cpp-plugin-needs). | no IL2CPP foundation, and the SDK package has no `net6.0` (IL2CPP) half |
@@ -182,10 +182,28 @@ Releases are the maintainers' job; you rarely need this.
 1. Set the version in `Directory.Build.props` and in both `runner/*/astra-gi.toml`.
 2. Run both release scripts (above), the IL2CPP one first: the Mono one's full build leaves the
    release's packages, and only them, in `artifacts/nuget`.
-3. Publish the GitHub release `v<version>` with `artifacts/astra-gi.zip`,
+3. Check every adapter against EVERY engine line you have a game of, not only the one it was built
+   against: it must list nothing missing.
+
+   ```bash
+   A=artifacts/foundation-mono/BepInEx/plugins/Astra
+   dotnet run --project tools/check-game-members -c Release -- il2cpp $A/Astra.Urp17.dll "<a 6000.0 URP game>_Data/Managed"
+   dotnet run --project tools/check-game-members -c Release -- il2cpp $A/Astra.Urp17.dll "<a 6000.3+ URP game>_Data/Managed"
+   ```
+
+   (and `Astra.Urp14.dll` against a 2022 or 2023 URP game, `Astra.Hdrp.dll` against an HDRP one).
+   IL names a member with the type that declared it when the adapter was compiled, so a member that
+   an engine line MOVED is "not found" there: 0.8.0's URP 17 adapter, built against 6000.0, named
+   `IRasterRenderGraphBuilder.SetRenderAttachment`, which 6000.3 moved into a new base interface, and
+   PEAK's screen went black. The foundation now refuses an adapter that does not bind in the game it
+   runs in (`AdapterProof.Prove`: she is drawn after the camera, and the log names the member), so a
+   miss here costs her place in the picture, not the game; this check finds it before players do. A
+   member that differs between lines goes through a binding made at load (`Urp17.Bind`), never into
+   the adapter's IL.
+4. Publish the GitHub release `v<version>` with `artifacts/astra-gi.zip`,
    `artifacts/astra-gi-il2cpp.zip` and `artifacts/nuget/Astra.Unity.Sdk.<version>.nupkg` (the one
    without a suffix).
-4. Once it is published, `tools/pin-template.sh <version>` and commit. It moves the integration
+5. Once it is published, `tools/pin-template.sh <version>` and commit. It moves the integration
    template to that release in one step: `<AstraVersion>` in its `.csproj`, the release's digests in
    its `tools/fetch.sh`, and the range in its `astra-item.toml`. Until then the template builds
    against the release before, which is what its users can download.

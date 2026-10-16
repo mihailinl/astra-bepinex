@@ -46,7 +46,7 @@ dotnet run --project tools/check-game-members -- dump "<game>/<Game>_Data/Manage
 Lists every field and property of the type (searched in every assembly of the folder) with its
 declared type: the material for the next `members.tsv` row.
 
-## `il2cpp`: what did an IL2CPP game strip that a plugin uses?
+## `il2cpp`: what does a game lack that a plugin names?
 
 ```bash
 dotnet run --project tools/check-game-members -- il2cpp <plugin.dll> "<profile>/BepInEx/interop"
@@ -58,3 +58,10 @@ A member whose body Il2CppInterop could not restore counts as missing. It exits 
 nothing is missing. For the foundation, run it on
 `src/Astra.BepInEx6.IL2CPP/bin/Release/net6.0/Astra.Unity.dll` and read the result as
 [`CONTRIBUTING.md`](../../CONTRIBUTING.md#il2cpp-games-the-stripping-audit) says.
+
+It works on a Mono game's `<Game>_Data/Managed` too (type forwarders such as `netstandard`'s are
+followed): run it on a pipeline adapter (`Astra.Urp17.dll`, `Astra.Urp14.dll`, `Astra.Hdrp.dll`)
+against every engine line you have a game of, before a release
+([`CONTRIBUTING.md`](../../CONTRIBUTING.md#releasing)). An adapter built against one line can name a
+member another line moved (`IRasterRenderGraphBuilder.SetRenderAttachment`, moved in Unity 6000.3):
+it is listed here as missing in that line's games.

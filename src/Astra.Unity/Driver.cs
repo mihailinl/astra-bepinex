@@ -144,7 +144,12 @@ namespace Astra.Unity
                     compositor?.Dispose();
                     compositor = null;
                 }
-                if (compositor != null) log.LogInfo(hooks.Compositing(settings.BeforePostProcessing.Value));
+                if (compositor != null)
+                {
+                    string where = hooks.Compositing(settings.BeforePostProcessing.Value);
+                    if (hooks.AdapterRefused) log.LogWarning(where);
+                    else log.LogInfo(where);
+                }
                 log.LogInfo($"{Application.productName} (Unity {Application.unityVersion}, {SystemInfo.graphicsDeviceType}, " +
                             $"{(srp ? Compat.PipelineClass() : "Built-in pipeline")})");
                 // The link itself is started lazily, from LateUpdate: never while there is no way to

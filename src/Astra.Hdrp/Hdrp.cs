@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
+using System;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using Astra.Bridge;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
@@ -14,12 +17,25 @@ namespace Astra.Unity
     /// <para>
     /// Its own assembly, compiled against HDRP (10+: <c>CustomPass.Execute(CustomPassContext)</c>), loaded
     /// by reflection only in an HDRP game (<c>Adapters</c>), so the plugin itself never depends on HDRP.
+    /// The foundation PROVES this class before the pass goes in (<c>AdapterProof.Prove</c> compiles all
+    /// of it at load: an HDRP that lacks a member it names gets her without the pass, and one line in
+    /// the log, never a broken camera); whatever still fails inside HDRP's render is caught there and
+    /// switches the pass off (<see cref="Failed"/>). The light readings are OPTIONAL and outside the
+    /// proof (<see cref="HdrpLight"/>): an HDRP that lacks what one of them names loses that reading only.
     /// </para>
     /// </summary>
     static class Hdrp
     {
         static CustomPassVolume volume;
         static AstraPass pass;
+
+        /// <summary>Her pass inside HDRP's render: its first failure there switches it off for the
+        /// session (said once, by the foundation, as it stands the adapter down).</summary>
+        static readonly Feature running = new Feature("her pass inside the camera's HDRP render");
+
+        /// <summary>Why her pass switched itself off inside HDRP's render; null while it runs. Read by
+        /// reflection (<c>HdrpHook</c>) every frame: it then stands the adapter down.</summary>
+        static string Failed() => running.Why;
 
         /// <summary>Put her pass on <paramref name="main"/>'s render (once; again when the main camera
         /// changes). Called by reflection.</summary>
@@ -28,7 +44,7 @@ namespace Astra.Unity
             if (volume == null)
             {
                 var host = new GameObject("Astra (HDRP pass)") { hideFlags = HideFlags.HideAndDontSave };
-                Object.DontDestroyOnLoad(host);
+                UnityEngine.Object.DontDestroyOnLoad(host);
                 volume = host.AddComponent<CustomPassVolume>();
                 volume.isGlobal = true;
                 volume.injectionPoint = CustomPassInjectionPoint.AfterPostProcess;
@@ -41,6 +57,40 @@ namespace Astra.Unity
             return true;
         }
 
+        sealed class AstraPass : CustomPass
+        {
+            public Compositor Compositor;
+            readonly MaterialPropertyBlock block = new MaterialPropertyBlock();
+
+            // The FENCE around the body in its own method: a body that does not compile fails at the
+            // fence's call, inside its try — never in HDRP's frame, which would drop the camera's
+            // render graph. NoInlining keeps the body out of the fence.
+            protected override void Execute(CustomPassContext ctx)
+            {
+                if (running.Off) return;
+                try { Draw(ctx); }
+                catch (Exception e) { running.Fail(e); }
+            }
+
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            void Draw(CustomPassContext ctx)
+            {
+                var c = Compositor;
+                if (c == null || !c.PrepareForPass(ctx.hdCamera.camera, intoTexture: true, block)) return;
+                CoreUtils.SetRenderTarget(ctx.cmd, ctx.cameraColorBuffer, ctx.cameraDepthBuffer, ClearFlag.None);
+                ctx.cmd.DrawProcedural(Matrix4x4.identity, c.Material, Compositor.DepthBufferPass, MeshTopology.Triangles, 3, 1, block);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The HDRP adapter's OPTIONAL readings — the camera's exposure, the sky's ambient probe, the fog
+    /// volume — outside the pass's proof (<see cref="Hdrp"/>): an HDRP that lacks what one of them
+    /// names (an older HDRP has no <c>LocalVolumetricFog</c>) loses that reading only. Each is bound and
+    /// fenced on its own by the foundation.
+    /// </summary>
+    static class HdrpLight
+    {
         static float exposure = -1;
         static bool reading;
         static float nextRead;
@@ -197,7 +247,7 @@ namespace Astra.Unity
             if (Time.unscaledTime < nextFogScan) return;
             nextFogScan = Time.unscaledTime + 2f;
             localFogs.Clear();
-            localFogs.AddRange(Object.FindObjectsOfType<LocalVolumetricFog>());
+            localFogs.AddRange(UnityEngine.Object.FindObjectsOfType<LocalVolumetricFog>());
         }
 
         /// <summary>The mean luminance of a spherical-harmonics probe's DC term (band 0) — the
@@ -210,20 +260,6 @@ namespace Astra.Unity
             const float k0 = 0.282095f;
             float r = Mathf.Max(0, sh[0, 0] * k0), g = Mathf.Max(0, sh[1, 0] * k0), b = Mathf.Max(0, sh[2, 0] * k0);
             return 0.2126f * r + 0.7152f * g + 0.0722f * b;
-        }
-
-        sealed class AstraPass : CustomPass
-        {
-            public Compositor Compositor;
-            readonly MaterialPropertyBlock block = new MaterialPropertyBlock();
-
-            protected override void Execute(CustomPassContext ctx)
-            {
-                var c = Compositor;
-                if (c == null || !c.PrepareForPass(ctx.hdCamera.camera, intoTexture: true, block)) return;
-                CoreUtils.SetRenderTarget(ctx.cmd, ctx.cameraColorBuffer, ctx.cameraDepthBuffer, ClearFlag.None);
-                ctx.cmd.DrawProcedural(Matrix4x4.identity, c.Material, Compositor.DepthBufferPass, MeshTopology.Triangles, 3, 1, block);
-            }
         }
     }
 }

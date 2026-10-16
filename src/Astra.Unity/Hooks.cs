@@ -38,15 +38,13 @@ namespace Astra.Unity
             Srp = GraphicsSettings.currentRenderPipeline != null;
             string pipeline = Compat.PipelineClass();
             Hdrp = Srp && pipeline != null && pipeline.EndsWith(".HDRenderPipelineAsset", StringComparison.Ordinal);
+            Adapters.Warn = m => log.LogWarning(m);
             UrpHook.BeforePost = settings.BeforePostProcessing.Value;
             UrpHook.TryLoad();
             HdrpHook.TryLoad();
-            if (Hdrp && !HdrpHook.Active && compositor != null)
-            {
-                // Without its adapter, HDRP's depth (a mip-pyramid atlas array) cannot be read.
-                compositor.DepthTest = false;
-                log.LogWarning($"HDRP without its adapter ({HdrpHook.Missing}): she is drawn over everything");
-            }
+            // Without its adapter, HDRP's depth (a mip-pyramid atlas array) cannot be read: she is drawn
+            // over everything (said in the start's line, Compositing).
+            if (Hdrp && !HdrpHook.Active && compositor != null) compositor.DepthTest = false;
             if (!Srp)
             {
                 Compat.HookBuiltIn(preCull);
@@ -64,7 +62,13 @@ namespace Astra.Unity
             return true;
         }
 
-        /// <summary>Where she is composited in this game, in one line for the log (after <see cref="Attach"/>).</summary>
+        /// <summary>This game's pipeline has an adapter that should have drawn her inside the camera's
+        /// render and it was left out (it did not load, or did not prove — <see cref="Adapters.Prove"/>):
+        /// the start's line (<see cref="Compositing"/>), which names why, is then a warning.</summary>
+        public bool AdapterRefused => Srp && (Hdrp ? HdrpHook.Refused : UrpHook.Refused);
+
+        /// <summary>Where she is composited in this game, in one line for the log (after <see cref="Attach"/>).
+        /// The ONE line that says why an adapter is not used (the camera handlers do not repeat it).</summary>
         public string Compositing(bool beforePostProcessing) =>
             !Srp
                 ? beforePostProcessing
@@ -74,6 +78,7 @@ namespace Astra.Unity
                 ? "compositing inside the camera's URP render, before its post-processing (the game's look is on her too)"
                 : UrpHook.Active ? $"compositing inside the camera's URP 17 render ({(UrpHook.RenderGraph ? "render graph" : "Compatibility Mode")}), after post-processing"
                 : HdrpHook.Active ? "compositing in an HDRP custom pass, against the camera's depth buffer"
-                : $"compositing after {(ContextEnd ? "the frame's cameras" : "the camera")} ({(Hdrp ? HdrpHook.Missing : UrpHook.Missing)})";
+                : Hdrp ? $"compositing after {(ContextEnd ? "the frame's cameras" : "the camera")}, over everything ({HdrpHook.Missing})"
+                : $"compositing after {(ContextEnd ? "the frame's cameras" : "the camera")} ({UrpHook.Missing})";
     }
 }

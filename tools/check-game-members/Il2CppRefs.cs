@@ -26,6 +26,9 @@ static class Il2CppRefs
         // as its full signature (Names.Method), a field as its name.
         var have = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var interop = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // A type FORWARDED to another assembly ("netstandard|System.Object" -> mscorlib's, in a Mono
+        // game's Managed): resolved once every assembly is read, so a forwarded reference is not missing.
+        var forwarded = new Dictionary<string, string>(StringComparer.Ordinal);
         int unrestored = 0;
         foreach (var dll in Directory.GetFiles(interopDir, "*.dll"))
         {
@@ -53,6 +56,17 @@ static class Il2CppRefs
                 foreach (var fh in td.GetFields()) members.Add(md.GetString(md.GetFieldDefinition(fh).Name));
                 have[asm + "|" + DefName(md, td)] = members;
             }
+            foreach (var eh in md.ExportedTypes)
+                if (Forward(md, eh) is var (full, target) && target != null)
+                    forwarded[asm + "|" + full] = target + "|" + full;
+        }
+        foreach (var f in forwarded)
+        {
+            // Followed through a chain of forwarders (netstandard -> mscorlib, or -> a facade that
+            // forwards again), at most a few hops.
+            string at = f.Value;
+            for (int hop = 0; hop < 4 && !have.ContainsKey(at) && forwarded.TryGetValue(at, out var next); hop++) at = next;
+            if (have.TryGetValue(at, out var members) && !have.ContainsKey(f.Key)) have[f.Key] = members;
         }
 
         using var plugin = new PEReader(File.OpenRead(pluginPath));
@@ -136,6 +150,25 @@ static class Il2CppRefs
         Console.WriteLine($"{count} missing reference(s) into {interop.Count} interop assemblies " +
             $"({unrestored} interop member(s) whose body could not be restored count as missing)");
         return count == 0 ? 0 : 1;
+    }
+
+    /// <summary>A forwarded type's full name (nested: Outer/Inner) and the assembly it is forwarded to;
+    /// a null target when it is not a forwarder.</summary>
+    static (string full, string? target) Forward(MetadataReader md, ExportedTypeHandle h)
+    {
+        var et = md.GetExportedType(h);
+        string ns = md.GetString(et.Namespace), name = md.GetString(et.Name);
+        switch (et.Implementation.Kind)
+        {
+            case HandleKind.AssemblyReference when et.IsForwarder:
+                return (ns.Length == 0 ? name : ns + "." + name,
+                    md.GetString(md.GetAssemblyReference((AssemblyReferenceHandle)et.Implementation).Name));
+            case HandleKind.ExportedType: // nested in a forwarded type: forwarded with it
+                var (outer, target) = Forward(md, (ExportedTypeHandle)et.Implementation);
+                return (outer + "/" + name, target);
+            default:
+                return (name, null);
+        }
     }
 
     /// <summary>A member Il2CppInterop put back whose body it could not restore: its IL throws

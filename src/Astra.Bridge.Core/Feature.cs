@@ -72,6 +72,18 @@ namespace Astra.Bridge
             }
         }
 
+        /// <summary>
+        /// A failure the caller caught in its OWN try — for a body that cannot be passed as a delegate
+        /// without a copy or a closure (a <c>ref</c> parameter, a render callback run every frame):
+        /// switches the feature off exactly as a throw from <see cref="Run(Action, Action{string}, Action)"/>
+        /// would. Only the FIRST failure counts; once off, a later call changes nothing and says nothing.
+        /// </summary>
+        public void Fail(Exception e, Action<string> warn = null, Action undo = null)
+        {
+            if (Off || e == null) return;
+            SwitchOff(e, warn, undo);
+        }
+
         void SwitchOff(Exception e, Action<string> warn, Action undo)
         {
             Off = true;

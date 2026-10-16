@@ -2,6 +2,7 @@
 using System;
 using System.IO;
 using System.Reflection;
+using Astra.Bridge;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -13,21 +14,67 @@ namespace Astra.Unity
     /// render (its depth exists only there). They are loaded by reflection and only in a game that
     /// runs that pipeline, so this plugin depends on none of them and keeps loading in every game.
     /// Anything that fails to bind leaves the plugin on its own path and says why.
+    /// <para>
+    /// THE RULE: an adapter's pass runs inside the game's own render, where a member the game's engine
+    /// lacks fails as the runtime compiles the method that names it — and the pipeline then drops the
+    /// camera's whole render, every frame (0.8.0 in a Unity 6000.3 game: a black screen). So before a
+    /// pass goes in, its adapter's essential class is PROVEN in this game (<see cref="Prove"/>: every
+    /// method of it compiled, here, inside a try); a class that does not prove is left out, she is
+    /// composited the way that needs no adapter, and the log says once which member is missing. A pass
+    /// that still fails inside the render catches it there and switches itself off; its hook reads that
+    /// before the next frame's pass and stands the adapter down, saying so once.
+    /// </para>
     /// </summary>
     static class Adapters
     {
+        const BindingFlags Statics = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+
+        /// <summary>An adapter's type, from its assembly beside this plugin.</summary>
+        /// <exception cref="Exception">The adapter is missing or its type does not load.</exception>
+        static Type Type(string assembly, string type)
+        {
+            string dir = Path.GetDirectoryName(typeof(Adapters).Assembly.Location);
+            var asm = Assembly.LoadFrom(Path.Combine(dir, assembly + ".dll"));
+            return asm.GetType(type, true);
+        }
+
         /// <summary>A static method of an adapter's type, as a delegate.</summary>
         /// <exception cref="Exception">The adapter is missing or does not bind.</exception>
         public static T Method<T>(string assembly, string type, string method) where T : Delegate
         {
-            string dir = Path.GetDirectoryName(typeof(Adapters).Assembly.Location);
-            var asm = Assembly.LoadFrom(Path.Combine(dir, assembly + ".dll"));
-            var m = asm.GetType(type, true).GetMethod(method, BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)
-                ?? throw new MissingMethodException(type, method);
+            var m = Type(assembly, type).GetMethod(method, Statics) ?? throw new MissingMethodException(type, method);
             return (T)Delegate.CreateDelegate(typeof(T), m);
         }
 
+        /// <summary>
+        /// May the adapter's ESSENTIAL class — everything its pass runs — go into this game's render?
+        /// Compiles all of it now (<see cref="AdapterProof.Prove"/>), then runs its <c>Bind</c> (where it
+        /// has one: what differs between engine lines, looked up once). Null when it may; otherwise why
+        /// not, in one line that names the missing member. Never throws.
+        /// </summary>
+        public static string Prove(string assembly, string type)
+        {
+            Type t;
+            try { t = Type(assembly, type); }
+            catch (Exception e) { return $"{assembly}.dll does not load: {Feature.Describe(e)}"; }
+            string why = AdapterProof.Prove(t);
+            if (why != null) return why;
+            try
+            {
+                var bind = t.GetMethod("Bind", Statics);
+                bind?.Invoke(null, null);
+                return null;
+            }
+            catch (Exception e)
+            {
+                return $"{type.Substring(type.LastIndexOf('.') + 1)}.Bind: {Feature.Describe(e)}";
+            }
+        }
+
         public static string PipelineName => Compat.PipelineClass();
+
+        /// <summary>Where a hook says, once, that it stood its adapter down (the Driver's warning).</summary>
+        public static Action<string> Warn;
     }
 
     /// <summary>
@@ -41,10 +88,15 @@ namespace Astra.Unity
     static class UrpHook
     {
         static Func<Camera, Compositor, bool> enqueue;
+        static Func<string> failed;
         static Func<float?> postExposure;
 
         /// <summary>Why there is no adapter (null when there is one).</summary>
         public static string Missing { get; private set; } = "not looked for";
+
+        /// <summary>This game should have had the adapter's pass and does not: it did not load, or did not
+        /// prove (<see cref="Adapters.Prove"/>). The start's log line is then a warning.</summary>
+        public static bool Refused { get; private set; }
 
         public static bool Active => enqueue != null;
 
@@ -59,17 +111,32 @@ namespace Astra.Unity
         /// pass is checked for having RUN (<c>Driver.RanInGraph</c>).</summary>
         public static bool BeforePostAdapter { get; private set; }
 
-        /// <summary>Drop the adapter for the rest of the run; she is composited after the camera.</summary>
+        /// <summary>Drop the adapter for the rest of the run, and say so once; she is composited after
+        /// the camera.</summary>
         public static void StandDown(string why)
         {
+            if (enqueue == null) return;
             enqueue = null;
+            failed = null;
             Missing = why;
+            Adapters.Warn?.Invoke($"compositing after the camera from now on: {why}");
+        }
+
+        /// <summary>The adapter is left out at load: <paramref name="why"/> goes in the start's line.</summary>
+        static void Refuse(string why)
+        {
+            enqueue = null;
+            failed = null;
+            Missing = why;
+            Refused = true;
         }
 
         public static void TryLoad()
         {
             enqueue = null;
+            failed = null;
             postExposure = null;
+            Refused = false;
             BeforePostAdapter = false;
             if (Adapters.PipelineName != "UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset")
             {
@@ -98,45 +165,60 @@ namespace Astra.Unity
                     Missing = $"URP on Unity {Application.unityVersion}: drawn over the finished frame (its depth texture outlives the camera)";
                     return;
                 }
-                try
-                {
-                    enqueue = Adapters.Method<Func<Camera, Compositor, bool>>("Astra.Urp14", "Astra.Unity.Urp14", "Enqueue");
-                    Missing = null;
-                    BeforePostAdapter = true;
-                }
-                catch (Exception e)
-                {
-                    Missing = $"the URP 14 adapter did not load ({e.GetType().Name}: {e.Message}): drawn over the finished frame";
-                }
+                if (Load("Astra.Urp14", "Astra.Unity.Urp14", "URP 14")) BeforePostAdapter = true;
                 return;
             }
-            try
-            {
-                RenderGraph = Adapters.Method<Func<bool>>("Astra.Urp17", "Astra.Unity.Urp17", "RenderGraphOn")();
-                enqueue = Adapters.Method<Func<Camera, Compositor, bool>>("Astra.Urp17", "Astra.Unity.Urp17", "Enqueue");
-                Missing = null;
-                try { postExposure = Adapters.Method<Func<float?>>("Astra.Urp17", "Astra.Unity.Urp17", "PostExposure"); }
-                catch (Exception) { postExposure = null; } // an older adapter: light values unconverted
-            }
-            catch (Exception e)
-            {
-                Missing = $"the URP 17 adapter did not load ({e.GetType().Name}: {e.Message})";
-            }
+            if (!Load("Astra.Urp17", "Astra.Unity.Urp17", "URP 17")) return;
+            // The optional readings, each on its own: one a line lacks costs only itself.
+            try { RenderGraph = Adapters.Method<Func<bool>>("Astra.Urp17", "Astra.Unity.Urp17Light", "RenderGraphOn")(); }
+            catch (Exception) { RenderGraph = true; } // no setting to read: the render graph is all there is
+            try { postExposure = Adapters.Method<Func<float?>>("Astra.Urp17", "Astra.Unity.Urp17Light", "PostExposure"); }
+            catch (Exception) { postExposure = null; } // light values unconverted
 #endif
         }
 
-        /// <summary>Queue her pass on this camera; false (and the adapter dropped) if it fails.</summary>
+        /// <summary>Prove the adapter's essential class in this game and bind its pass; false (and why
+        /// in <see cref="Missing"/>) when it is left out.</summary>
+        static bool Load(string assembly, string type, string which)
+        {
+            string why = Adapters.Prove(assembly, type);
+            if (why != null)
+            {
+                Refuse($"the {which} adapter does not bind in this game, so her pass is left out: {why}");
+                return false;
+            }
+            try
+            {
+                failed = Adapters.Method<Func<string>>(assembly, type, "Failed");
+                enqueue = Adapters.Method<Func<Camera, Compositor, bool>>(assembly, type, "Enqueue");
+                Missing = null;
+                return true;
+            }
+            catch (Exception e)
+            {
+                Refuse($"the {which} adapter did not load: {Feature.Describe(e)}");
+                return false;
+            }
+        }
+
+        /// <summary>Queue her pass on this camera; false (and the adapter stood down) once the pass has
+        /// switched itself off inside the render, or the queueing fails.</summary>
         public static bool Enqueue(Camera cam, Compositor compositor)
         {
             if (enqueue == null) return false;
             try
             {
+                string why = failed();
+                if (why != null)
+                {
+                    StandDown($"her pass failed inside the camera's URP render and switched itself off ({why})");
+                    return false;
+                }
                 return enqueue(cam, compositor);
             }
             catch (Exception e)
             {
-                Missing = $"the URP adapter failed ({e.GetType().Name}: {e.Message})";
-                enqueue = null;
+                StandDown($"the URP adapter failed ({Feature.Describe(e)})");
                 return false;
             }
         }
@@ -167,6 +249,7 @@ namespace Astra.Unity
     static class HdrpHook
     {
         static Func<Camera, Compositor, bool> attach;
+        static Func<string> failed;
         static Func<Camera, float> exposure;
         static bool ambient;
         static Func<Camera, (bool enabled, float density, Color color)> fog;
@@ -174,12 +257,18 @@ namespace Astra.Unity
 
         public static string Missing { get; private set; } = "not looked for";
 
+        /// <summary>This HDRP game should have had the adapter's pass and does not (it did not load, or
+        /// did not prove): the start's log line is then a warning.</summary>
+        public static bool Refused { get; private set; }
+
         public static bool Active => attach != null;
 
         public static void TryLoad()
         {
             attach = null;
+            failed = null;
             attachedTo = null;
+            Refused = false;
             if (Adapters.PipelineName != "UnityEngine.Rendering.HighDefinition.HDRenderPipelineAsset")
             {
                 Missing = "not an HDRP game";
@@ -190,21 +279,33 @@ namespace Astra.Unity
             Missing = "the IL2CPP flavour has no HDRP adapter";
             return;
 #else
+            string why = Adapters.Prove("Astra.Hdrp", "Astra.Unity.Hdrp");
+            if (why != null)
+            {
+                Missing = $"the HDRP adapter does not bind in this game, so her pass is left out: {why}";
+                Refused = true;
+                return;
+            }
             try
             {
+                failed = Adapters.Method<Func<string>>("Astra.Hdrp", "Astra.Unity.Hdrp", "Failed");
                 attach = Adapters.Method<Func<Camera, Compositor, bool>>("Astra.Hdrp", "Astra.Unity.Hdrp", "Attach");
                 Missing = null;
-                try { exposure = Adapters.Method<Func<Camera, float>>("Astra.Hdrp", "Astra.Unity.Hdrp", "Exposure"); }
-                catch (Exception) { exposure = null; } // an older adapter: lights unconverted
-                try { Sh.BindHdrp(); ambient = true; }
-                catch (Exception) { ambient = false; }
-                try { fog = Adapters.Method<Func<Camera, (bool, float, Color)>>("Astra.Hdrp", "Astra.Unity.Hdrp", "ReadFog"); }
-                catch (Exception) { fog = null; } // an older adapter: no HDRP fog
             }
             catch (Exception e)
             {
-                Missing = $"the HDRP adapter did not load ({e.GetType().Name}: {e.Message})";
+                attach = null;
+                Missing = $"the HDRP adapter did not load: {Feature.Describe(e)}";
+                Refused = true;
+                return;
             }
+            // The optional readings, each on its own: one an HDRP lacks costs only itself.
+            try { exposure = Adapters.Method<Func<Camera, float>>("Astra.Hdrp", "Astra.Unity.HdrpLight", "Exposure"); }
+            catch (Exception) { exposure = null; } // lights unconverted
+            try { Sh.BindHdrp(); ambient = true; }
+            catch (Exception) { ambient = false; }
+            try { fog = Adapters.Method<Func<Camera, (bool, float, Color)>>("Astra.Hdrp", "Astra.Unity.HdrpLight", "ReadFog"); }
+            catch (Exception) { fog = null; } // no HDRP fog
 #endif
         }
 
@@ -261,24 +362,36 @@ namespace Astra.Unity
             }
         }
 
-        /// <summary>Make sure her pass is on <paramref name="main"/>; false (and the adapter dropped)
-        /// if it fails.</summary>
+        /// <summary>Make sure her pass is on <paramref name="main"/>; false (and the adapter stood down,
+        /// saying so once) once the pass has switched itself off inside the render, or attaching
+        /// fails. She is then composited after the camera, without a depth test: HDRP's depth is a
+        /// mip-pyramid atlas only the pass could read.</summary>
         public static bool Ensure(Camera main, Compositor compositor)
         {
             if (attach == null) return false;
-            if (main == attachedTo) return true;
+            string why;
             try
             {
-                attach(main, compositor);
-                attachedTo = main;
-                return true;
+                why = failed();
+                if (why == null)
+                {
+                    if (main == attachedTo) return true;
+                    attach(main, compositor);
+                    attachedTo = main;
+                    return true;
+                }
+                why = $"her pass failed inside the camera's HDRP render and switched itself off ({why})";
             }
             catch (Exception e)
             {
-                Missing = $"the HDRP adapter failed ({e.GetType().Name}: {e.Message})";
-                attach = null;
-                return false;
+                why = $"the HDRP adapter failed ({Feature.Describe(e)})";
             }
+            attach = null;
+            failed = null;
+            Missing = why;
+            if (compositor != null) compositor.DepthTest = false;
+            Adapters.Warn?.Invoke($"compositing after the camera from now on, over everything: {why}");
+            return false;
         }
     }
 }

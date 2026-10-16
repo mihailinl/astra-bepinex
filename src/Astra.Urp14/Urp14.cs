@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 using System;
+using System.Runtime.CompilerServices;
+using Astra.Bridge;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -30,24 +32,32 @@ namespace Astra.Unity
     /// Its own assembly, compiled against URP 14, so the plugin itself keeps compiling against Unity
     /// 2021.3 and loading in every game: <c>UrpHook</c> loads this one only in a URP game on Unity
     /// 2022–2023 and falls back (her picture composited over the finished frame) if anything here
-    /// does not bind.
+    /// does not bind — which it PROVES before the pass goes in (<c>AdapterProof.Prove</c> compiles all
+    /// of this class at load: a URP 13, 15 or 16 that lacks a member it names gets her over the
+    /// finished frame, and one line in the log, never a broken camera). Whatever still fails inside
+    /// URP's render is caught there and switches the pass off (<see cref="Failed"/>).
     /// </para>
     /// </summary>
     static class Urp14
     {
         static AstraPass pass;
 
-        /// <summary>What a pass threw inside URP's own loop (API drift on URP 13/15/16 — this is
-        /// compiled against 14 — or anything else): caught there, so it never breaks the game's
-        /// render, and surfaced by the next <see cref="Enqueue"/>, which the foundation fences.</summary>
-        static Exception failed;
+        /// <summary>Her pass inside URP's own loop: what it throws there (API drift on URP 13/15/16 —
+        /// this is compiled against 14 — or anything else) is caught there, so it never breaks the
+        /// game's render, and switches it off for the session.</summary>
+        static readonly Feature running = new Feature("her pass inside the camera's URP render");
+
+        /// <summary>Why her pass switched itself off inside URP's render; null while it runs. Read by
+        /// reflection (<c>UrpHook</c>) before every <see cref="Enqueue"/>: it then stands the adapter
+        /// down.</summary>
+        static string Failed() => running.Why;
 
         /// <summary>Queue her pass on <paramref name="cam"/>'s renderer for this frame. False when this
-        /// camera has no URP renderer (the caller then composites the old way). Throws once the pass
-        /// has failed, which drops the adapter. Called by reflection (<c>UrpHook</c>).</summary>
+        /// camera has no URP renderer or the pass is off (the caller then composites the old way).
+        /// Called by reflection (<c>UrpHook</c>).</summary>
         static bool Enqueue(Camera cam, Compositor compositor)
         {
-            if (failed != null) throw new InvalidOperationException($"her pass failed: {failed.GetType().Name}: {failed.Message}");
+            if (running.Off) return false;
             var data = cam.GetUniversalAdditionalCameraData();
             var renderer = data != null ? data.scriptableRenderer : null;
             if (renderer == null) return false;
@@ -82,39 +92,44 @@ namespace Astra.Unity
                 renderPassEvent = RenderPassEvent.BeforeRenderingTransparents;
             }
 
+            // Each entry URP calls is a FENCE around a body in its own method: a body that does not
+            // compile fails at the fence's call, inside its try — never in URP's frame. NoInlining
+            // keeps the body out of the fence.
+
             /// <summary>No target configured: URP draws the pass into the camera's own colour and depth
             /// targets. Whether that colour target is a texture (it is whenever the camera post-processes
             /// or a feature needs it) or the back buffer decides the picture's vertical flip.</summary>
             public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
             {
-                try
-                {
-                    var target = renderingData.cameraData.renderer.cameraColorTargetHandle;
-                    intoTexture = target == null || target.nameID != new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget);
-                }
-                catch (Exception e)
-                {
-                    failed ??= e;
-                }
+                if (running.Off) return;
+                try { Setup(ref renderingData); }
+                catch (Exception e) { running.Fail(e); }
+            }
+
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            void Setup(ref RenderingData renderingData)
+            {
+                var target = renderingData.cameraData.renderer.cameraColorTargetHandle;
+                intoTexture = target == null || target.nameID != new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget);
             }
 
             public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
             {
-                if (failed != null) return;
-                try
-                {
-                    var cam = renderingData.cameraData.camera;
-                    if (!Compositor.PrepareForPass(cam, intoTexture, block)) return;
-                    var cmd = CommandBufferPool.Get("Astra");
-                    cmd.DrawProcedural(Matrix4x4.identity, Compositor.Material, Compositor.DepthBufferPass, MeshTopology.Triangles, 3, 1, block);
-                    if (Before) cmd.DrawProcedural(Matrix4x4.identity, Compositor.Material, Compositor.HerDepthPass, MeshTopology.Triangles, 3, 1, block);
-                    context.ExecuteCommandBuffer(cmd);
-                    CommandBufferPool.Release(cmd);
-                }
-                catch (Exception e)
-                {
-                    failed ??= e;
-                }
+                if (running.Off) return;
+                try { Draw(context, ref renderingData); }
+                catch (Exception e) { running.Fail(e); }
+            }
+
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            void Draw(ScriptableRenderContext context, ref RenderingData renderingData)
+            {
+                var cam = renderingData.cameraData.camera;
+                if (!Compositor.PrepareForPass(cam, intoTexture, block)) return;
+                var cmd = CommandBufferPool.Get("Astra");
+                cmd.DrawProcedural(Matrix4x4.identity, Compositor.Material, Compositor.DepthBufferPass, MeshTopology.Triangles, 3, 1, block);
+                if (Before) cmd.DrawProcedural(Matrix4x4.identity, Compositor.Material, Compositor.HerDepthPass, MeshTopology.Triangles, 3, 1, block);
+                context.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
             }
         }
     }

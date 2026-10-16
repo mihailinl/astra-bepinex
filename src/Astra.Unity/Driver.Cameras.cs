@@ -118,13 +118,9 @@ namespace Astra.Unity
             if (compositor == null || faulted) return;
             // URP 17: her pass goes INTO this camera's render graph (the only place its depth exists).
             // HDRP: her custom pass rides on this camera (attached once per main camera).
+            // Why she is not (the adapter left out at load, or stood down since) is said where it is
+            // decided, once: the start's line (Hooks.Compositing) and the hooks' StandDown.
             inGraph = srp && (hdrp ? HdrpHook.Ensure(cam, compositor) : UrpHook.Enqueue(cam, compositor));
-            string missing = hdrp ? HdrpHook.Missing : UrpHook.Missing;
-            // Guarded (M5): this clause holds for a whole session without the pipeline's adapter, so
-            // without the membership check first, the interpolated string was built EVERY camera begin
-            // even though Once() only ever logs it the first time.
-            if (srp && !inGraph && missing != null && !logged.Contains("adapter-fallback"))
-                Once("adapter-fallback", $"compositing after the camera: {missing}");
         }
         void OnEndCamera(Camera cam)
         {
@@ -187,10 +183,11 @@ namespace Astra.Unity
         }
         /// <summary>
         /// Was her composite drawn inside <paramref name="cam"/>'s own render this frame? Queued is not
-        /// drawn for the URP 2022–2023 adapter: a reflection camera rendered inside the main camera's
-        /// begin can empty the renderer's queue, and a URP 16 render graph never calls a plain pass —
-        /// then she is composited after the camera this frame, and after 120 frames running the
-        /// adapter stands down for good (logged once). The other adapters ran when queued.
+        /// drawn: a reflection camera rendered inside the main camera's begin can empty the renderer's
+        /// queue, a URP 16 render graph never calls a plain pass, a URP 17 one drops a camera's whole
+        /// graph when anything in it fails, and her pass records nothing without the camera's depth
+        /// texture — then she is composited after the camera this frame, and after 120 frames running
+        /// the adapter stands down for good (said once, by StandDown).
         /// </summary>
         bool RanInGraph(Camera cam)
         {
@@ -201,19 +198,15 @@ namespace Astra.Unity
                 return true;
             }
             if (++passMisses > 120 && UrpHook.Active)
-            {
                 UrpHook.StandDown("her pass was queued but never ran in the camera for 120 frames");
-                log.LogWarning($"compositing after the camera: {UrpHook.Missing}");
-            }
             return false;
         }
-        /// <summary>Did her queued pass run for <paramref name="cam"/> this frame? Always, for the
-        /// adapters whose queued pass runs (HDRP, URP 17); for the URP 2022–2023 one, only if it
-        /// stamped this frame and this camera (an extra camera's end comes right after its own render,
-        /// before another camera's pass could stamp over it).</summary>
+        /// <summary>Did her queued pass run for <paramref name="cam"/> this frame? For a URP adapter,
+        /// only if it stamped this frame and this camera (<see cref="Compositor.PrepareForPass"/>; an
+        /// extra camera's end comes right after its own render, before another camera's pass could
+        /// stamp over it). Always for HDRP's, whose custom pass runs every frame once attached.</summary>
         bool PassRan(Camera cam) =>
-            hdrp || !UrpHook.BeforePostAdapter
-            || (compositor.PassFrame == Time.frameCount && compositor.PassCamera == cam.GetInstanceID());
+            hdrp || (compositor.PassFrame == Time.frameCount && compositor.PassCamera == cam.GetInstanceID());
         void OnEndContext()
         {
             if (textureStack.Done()) DrawStacked();
