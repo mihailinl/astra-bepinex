@@ -8,6 +8,24 @@ authors = ["mihailinl"]
 license = "MIT"
 repo = "https://github.com/mihailinl/astra-bepinex"
 
+# Play together with the player's own BepInEx 6 (their mod manager's profile, or a hand-installed
+# BepInEx in the game folder): a launcher that understands this plays Doorstop's CoreCLR host on
+# `chain` instead of the preloader, which hands the game to THEIR BepInEx.Unity.IL2CPP.dll and adds
+# this profile's BepInEx/plugins (docs/GAME-INTEGRATION-MANIFEST.md §7). Nested under [integration]
+# for the same reason the Mono runner's is (runner/astra-gi.toml's own comment): every unknown key
+# directly under [target]/[[files]]/[[game_files]]/[launch]/[[config_writes]] is refused outright,
+# but [integration] is metadata, read with no key check at all.
+# `bepinex_build` is the EXACT be.xxx build this chain is compiled for (BepInEx 6 is pre-1.0; its
+# internal APIs are not guaranteed stable between builds the way BE5's plugin API is across 5.4.x) —
+# a launcher offers "with mods" only when the source profile's BepInEx.Core.dll ProductVersion
+# starts with "6.0.0-be.<bepinex_build>"; the chain loader itself re-checks this and falls back to
+# Astra's own session otherwise (design §9, Astra.Chain.CoreCLR/ChainCore.cs ValidateTarget).
+[integration.mods]
+loader = "bepinex6-il2cpp"
+bepinex_build = 788
+chain = "${profile}/chain/Astra.Chain.CoreCLR.dll"
+chain_config = "${profile}/chain/chain.ini"
+
 [target]                           # a RUNNER: any Unity IL2CPP game the user picks
 engine = "unity-il2cpp"
 exe = "*"                          # the user picks the game; the launcher checks it is Unity IL2CPP
@@ -26,6 +44,10 @@ to = "${profile}/dotnet/"
 [[files]]
 from = "BepInEx/plugins/**"        # the foundation's IL2CPP flavour (Astra/)
 to = "${profile}/BepInEx/plugins/"
+
+[[files]]
+from = "chain/**"                  # Astra.Chain.CoreCLR.dll + Astra.Chain.Hooks.IL2CPP.dll: only
+to = "${profile}/chain/"           # used when a launcher plays "with mods"; harmless extra files otherwise
 
 # Beside the game's exe — the only files that touch the game folder. Each one is on the consent
 # sheet, pinned by its digest, backed up if it replaces a game file and restored on uninstall.

@@ -71,10 +71,13 @@ check il2cpp "IL2CPP_INTEROP_DIR (or the first argument) to an IL2CPP game's Bep
 
 dotnet build src/Astra.BepInEx5 -c Release -v q
 # The chain loader (play together with the player's own mods, docs/GAME-INTEGRATION-MANIFEST.md
-# §7): Mono/BepInEx 5 only so far. Astra.Chain.dll carries no reference to Astra.Chain.Hooks.dll —
-# building it is independent of everything above.
+# §7): both flavours build independently of everything above — neither references the foundation,
+# and neither (unlike Astra.BepInEx6.IL2CPP itself) touches Unity/IL2CPP interop types, so the
+# IL2CPP flavour needs no $INTEROP either.
 dotnet build src/Astra.Chain -c Release -v q
 dotnet build src/Astra.Chain.Hooks -c Release -v q
+dotnet build src/Astra.Chain.CoreCLR -c Release -v q
+dotnet build src/Astra.Chain.Hooks.IL2CPP -c Release -v q
 if [ -n "${ok[urp17]:-}" ]; then
   dotnet build src/Astra.Urp17 -c Release -v q -p:UrpRefDir="$URP17"
 fi
@@ -125,11 +128,13 @@ for flavour in mono il2cpp; do
   cp $src/Astra.Unity.dll $src/Astra.Bridge.Core.dll $src/astra-item.json "$out/"
 done
 
-# The chain loader as it goes into a zip's chain/ (Mono only; no IL2CPP flavour yet).
-rm -rf artifacts/chain-mono
-mkdir -p artifacts/chain-mono
+# The chain loader as it goes into a zip's chain/.
+rm -rf artifacts/chain-mono artifacts/chain-il2cpp
+mkdir -p artifacts/chain-mono artifacts/chain-il2cpp
 cp src/Astra.Chain/bin/Release/Astra.Chain.dll artifacts/chain-mono/
 cp src/Astra.Chain.Hooks/bin/Release/netstandard2.0/Astra.Chain.Hooks.dll artifacts/chain-mono/
+cp src/Astra.Chain.CoreCLR/bin/Release/Astra.Chain.CoreCLR.dll artifacts/chain-il2cpp/
+cp src/Astra.Chain.Hooks.IL2CPP/bin/Release/net6.0/Astra.Chain.Hooks.IL2CPP.dll artifacts/chain-il2cpp/
 
 ls -R artifacts | head -40
 

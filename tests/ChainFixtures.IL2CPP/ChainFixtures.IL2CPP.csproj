@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Fixture plugins for the IL2CPP half of tools/test-chain-il2cpp.sh. Plain BepInEx.Unity.IL2CPP
+       BasePlugin subclasses with NO reference to Astra at all (not even compile-only), placed in a
+       scratch copy of the real be.788 pack's plugins/ folder. BasePlugin (unlike BE5's
+       BaseUnityPlugin) is NOT a MonoBehaviour, so — unlike tests/ChainFixtures (Mono) — this needs
+       no UnityEngine.Modules compile reference and no IL2CPP interop at all:
+         - FixtureMod: THEIR BepInEx actually ran (reads a config value FROM THEIR PROFILE, which
+           only their own unpatched ConfigFile ctor would have read untouched).
+         - StaleAstra: a second copy of the foundation's OWN GUID (astra.unity-foundation), version
+           99.0.0 — same reasoning as the Mono fixture (review S5): newer than any real release, so
+           only Astra.Chain.Hooks.IL2CPP's own dedupe-by-GUID (never BepInEx's own
+           newest-version-wins rule) can be what removes it. It must never reach Load() once the
+           chain is installed.
+         - DependsOnAstra: a per-game-integration-shaped fixture with [BepInDependency] on the
+           foundation's GUID, proving BE6's dependency sort resolves a plugin merged in by the chain
+           (via DiscoverPluginsFrom, never their own Paths.PluginPath) the same as one found on its
+           own. -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>ChainFixtures.IL2CPP</AssemblyName>
+    <RootNamespace>ChainFixtures</RootNamespace>
+    <Nullable>disable</Nullable>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.788" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

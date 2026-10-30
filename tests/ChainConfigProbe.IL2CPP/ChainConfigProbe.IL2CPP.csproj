@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A second IL2CPP fixture, kept separate from tests/ChainFixtures.IL2CPP on purpose: this one
+       is placed in ASTRA'S OWN plugins folder (so Astra.Chain.Hooks.IL2CPP's DiscoverPluginsFrom
+       discovers it as "mine"), where ChainFixtures.IL2CPP's plugins must stay "theirs". Its Load()
+       SETS a config value so the ConfigFile ctor prefix has something real to redirect. -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>ChainConfigProbe.IL2CPP</AssemblyName>
+    <RootNamespace>ChainConfigProbe</RootNamespace>
+    <Nullable>disable</Nullable>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.788" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

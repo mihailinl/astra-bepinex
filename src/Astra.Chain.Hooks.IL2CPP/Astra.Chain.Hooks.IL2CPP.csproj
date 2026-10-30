@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Astra.Chain.CoreCLR's second half (design §4.3 step 5, §4.4), loaded via Assembly.LoadFrom
+       only AFTER the player's own BepInEx 6 preloader has run — so BepInEx.Core.dll, 0Harmony.dll
+       and Mono.Cecil.dll all bind to THEIR copies by simple name, through the Astra.Chain.CoreCLR
+       AssemblyLoadContext.Resolving handler registered over their core directory (same loose,
+       unsigned-assembly binding every BepInEx plugin relies on). Compiled against the SAME BepInEx
+       6 be.788 package the IL2CPP foundation itself compiles against (Astra.BepInEx6.IL2CPP.csproj)
+       — nothing here is shipped; it is all PrivateAssets="all". -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>Astra.Chain.Hooks.IL2CPP</AssemblyName>
+    <RootNamespace>Astra.Chain</RootNamespace>
+    <Nullable>disable</Nullable>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.788" PrivateAssets="all" />
+    <PackageReference Include="Mono.Cecil" Version="0.11.4" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

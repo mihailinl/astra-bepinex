@@ -222,6 +222,7 @@ in the game folder — rather than in Astra's own, separate BepInEx. The full de
 loader = "bepinex5"                              # "bepinex6-il2cpp" for an IL2CPP integration
 chain = "${profile}/chain/Astra.Chain.dll"       # IL2CPP: "${profile}/chain/Astra.Chain.CoreCLR.dll"
 chain_config = "${profile}/chain/chain.ini"      # the launcher writes it at every Play with mods
+bepinex_build = 788                              # IL2CPP ONLY — see "The IL2CPP flavour" below
 ```
 
 Plus a files rule that places the chain loader's two DLLs:
@@ -282,3 +283,27 @@ plugin (Astra's own, or a per-game integration on the foundation) that construct
 `ConfigFile` by hand with the 2-argument constructor (no owner metadata) gets no redirect: that
 file is written wherever `configPath` says, which under a chained session is the player's profile.
 Always pass the plugin's own `BepInPlugin` metadata.
+
+**The IL2CPP flavour** (`loader = "bepinex6-il2cpp"`, `Astra.Chain.CoreCLR.dll` +
+`Astra.Chain.Hooks.IL2CPP.dll`) hands off to `BepInEx.Unity.IL2CPP.dll` instead of
+`BepInEx.Preloader.dll` — same `Doorstop.Entrypoint.Start()` ABI (confirmed by disassembling the
+real be.788 core: the method is identical in name and shape to BE5's), same fallback rule, same
+`hooks-failed` distinction, same `ConfigFile` 3-argument-ctor rule. Two differences:
+
+- **The exact-build gate.** BepInEx 6 is pre-1.0; its internal APIs (`BaseChainloader<BasePlugin>
+  .DiscoverPlugins`, the `ConfigFile` ctor) are not guaranteed stable between be.xxx builds the way
+  BE5's plugin API is across 5.4.x. `target`'s `BepInEx.Core.dll` must report a `ProductVersion`
+  starting with `6.0.0-be.<bepinex_build>` (the manifest's own field, so a future chain pinned to a
+  newer build only has to change one number) — anything else, including a DIFFERENT BepInEx 6 build
+  (verified against a real `6.0.0-dev+…` V Rising pack), takes the real fallback, never a
+  half-started session.
+- **One CoreCLR-only wrinkle.** Doorstop's CoreCLR host fixes `APP_PATHS` exactly once, at process
+  boot, to `"<corlib dir>;<directory of the doorstop target assembly>"` — and that target assembly
+  is the CHAIN's own path, never theirs (or, on fallback, never Astra's own `BepInEx/core` either).
+  So before invoking ANY preloader's `Start()` — theirs on hand-off, Astra's own on fallback —
+  `Astra.Chain.CoreCLR` registers an `AssemblyLoadContext.Default.Resolving` handler over that
+  preloader's own core directory; without it, every dependency it (or
+  `Astra.Chain.Hooks.IL2CPP.dll`) resolves by simple name — `BepInEx.Core`, `0Harmony`,
+  `Mono.Cecil`, `MonoMod.*`, `Il2CppInterop.*` — fails to load. BE5/Mono needs no equivalent: .NET
+  Framework's `Assembly.LoadFrom` already probes the loaded assembly's own directory for its
+  dependencies on its own.

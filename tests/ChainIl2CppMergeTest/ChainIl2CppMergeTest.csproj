@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A Doorstop CoreCLR target for tools/test-chain-il2cpp.sh, used ONLY to test
+       Astra.Chain.Hooks.IL2CPP's own merge/dedupe/config-redirect logic against the REAL be.788
+       BepInEx.Core/0Harmony/Mono.Cecil/BepInEx.Unity.IL2CPP assemblies, invoked by the REAL
+       Doorstop (its native CoreCLR bootstrap, same ABI Astra.Chain.CoreCLR itself uses — see that
+       project's own header) under the REAL be.788 Linux libcoreclr.so, through the REAL testbed
+       player (run_bepinex.sh, pointing its doorstop-target-assembly option at this dll), so
+       Harmony/MonoMod's native detour patching runs under the EXACT runtime it was built for.
+
+       It deliberately never touches BepInEx 6's own Preloader.Run()/IL2CPPChainloader at all — only
+       Harmony/MonoMod/Cecil's own patches plus a minimal BaseChainloader<BasePlugin> subclass with
+       none of IL2CPPChainloader's IL2CPP-native overrides (GameAssembly, the runtime-invoke detour).
+       That native layer segfaults on this sandboxed host for BOTH a chained and an unchained direct
+       launch of the real preloader (confirmed identical; NOTES-lane.md) — an environment/host issue
+       with THIS testbed, unrelated to the chain, so this project exists to prove the merge logic
+       itself works without going anywhere near it. A bare `dotnet exec` host (no Doorstop at all,
+       tried first) hit a DIFFERENT native crash instead (deep inside libcoreclr.so itself): it
+       rolls forward to whatever system .NET is installed (there is no .NET 6 runtime on this box),
+       and Harmony/MonoMod's native detour patching assumes the JIT codegen of the CLR version it
+       was built for (6.0), which a roll-forward to a much newer major version does not guarantee.
+       This project sidesteps BOTH crashes by running under the real 6.0.7 runtime via the real
+       Doorstop, exactly as production does. -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>Astra.Chain.MergeTest</AssemblyName>
+    <RootNamespace>Astra.Chain.MergeTest</RootNamespace>
+    <OutputType>Library</OutputType>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Nullable>disable</Nullable>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+    <!-- This DLL is invoked directly by Doorstop (coreclr_create_delegate), never through a host
+         that resolves a .deps.json — its own APP_PATHS entry (its own directory) must carry every
+         dependency BepInEx.Core/0Harmony/Mono.Cecil/BepInEx.Unity.IL2CPP it (and its
+         Astra.Chain.Hooks.IL2CPP reference) needs, exactly like a real BepInEx plugin folder. A
+         plain library project does not copy-local its package references by default. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.788" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Astra.Chain.Hooks.IL2CPP/Astra.Chain.Hooks.IL2CPP.csproj" />
+  </ItemGroup>
+</Project>

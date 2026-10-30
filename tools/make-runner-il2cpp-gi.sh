@@ -29,10 +29,13 @@ if [ -z "${BEPINEX6_ZIP:-}" ]; then
 fi
 echo "$BEPINEX6_SHA256  $BEPINEX6_ZIP" | sha256sum -c --quiet
 mkdir -p "$OUT/bie" && unzip -q "$BEPINEX6_ZIP" -d "$OUT/bie"
-Z="$OUT/zip"; mkdir -p "$Z/BepInEx/core" "$Z/BepInEx/plugins" "$Z/dotnet" "$Z/licenses"
+Z="$OUT/zip"; mkdir -p "$Z/BepInEx/core" "$Z/BepInEx/plugins" "$Z/dotnet" "$Z/chain" "$Z/licenses"
 cp -r "$OUT/bie/BepInEx/core/." "$Z/BepInEx/core/"
 cp -r "$OUT/bie/dotnet/." "$Z/dotnet/"
 cp -r artifacts/foundation-il2cpp/BepInEx/plugins/Astra "$Z/BepInEx/plugins/Astra"
+# Play together with the player's own mods (docs/GAME-INTEGRATION-MANIFEST.md §7): used only when a
+# launcher plays "with mods" ([integration.mods] in astra-gi.toml); harmless extra files otherwise.
+cp artifacts/chain-il2cpp/Astra.Chain.CoreCLR.dll artifacts/chain-il2cpp/Astra.Chain.Hooks.IL2CPP.dll "$Z/chain/"
 cp "$OUT/bie/winhttp.dll" "$Z/winhttp.dll"
 cp runner/il2cpp/doorstop_config.ini "$Z/doorstop_config.ini"
 cp LICENSE "$Z/licenses/astra-foundation-LICENSE.txt"

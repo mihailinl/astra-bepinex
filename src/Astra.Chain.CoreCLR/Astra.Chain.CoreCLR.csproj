@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The CoreCLR/IL2CPP flavour of the chain loader (design: gi-bugs/unity-mods-design.md §4.3,
+       §9's "IL2CPP chain" risk). Doorstop's CoreCLR host points at this DLL instead of BepInEx 6's
+       own BepInEx.Unity.IL2CPP.dll when the launcher plays "with mods": it hands the process to the
+       PLAYER's own BepInEx 6 preloader (same Doorstop.Entrypoint.Start() ABI their own
+       Runtimes/Unity/BepInEx.Unity.IL2CPP/DoorstopEntrypoint.cs exposes — confirmed by disassembling
+       the real be.788 BepInEx.Unity.IL2CPP.dll, gi-bugs/packs/x/…/BepInExPack_IL2CPP-6.0.788), then
+       installs Astra.Chain.Hooks.IL2CPP.dll so Astra's plugins are discovered alongside theirs.
+
+       net6.0 ONLY (no BepInEx, no Harmony, no project reference to Hooks.IL2CPP): it must load and
+       run correctly the instant Doorstop's CoreCLR host (coreclr_create_delegate) invokes it, before
+       anything else is known to exist. Unlike Astra.Chain (Mono), this half DOES need one CoreCLR-only
+       API — System.Runtime.Loader.AssemblyLoadContext — because Doorstop's CoreCLR bootstrap
+       (gi-bugs/src/doorstop/src_bootstrap.c:il2cpp_doorstop_bootstrap) sets APP_PATHS exactly ONCE,
+       at coreclr_initialize, to "<clr_corlib_dir>;<directory of the doorstop target assembly>" — and
+       that target assembly is OUR chain DLL's path, never theirs. So once we hand the process to
+       THEIR BepInEx.Unity.IL2CPP.dll, every dependency it (or Astra.Chain.Hooks.IL2CPP.dll) tries to
+       resolve by simple name — BepInEx.Core.dll, 0Harmony.dll, Mono.Cecil.dll, MonoMod.*,
+       Il2CppInterop.* — is NOT under either APP_PATHS entry; only an explicit
+       AssemblyLoadContext.Default.Resolving handler over THEIR core directory (ChainCore.cs) makes
+       those resolve. Astra.Chain.Hooks.IL2CPP.dll is reached only via Assembly.LoadFrom + reflection,
+       after their preloader has already run — same shape as the Mono half. -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>Astra.Chain.CoreCLR</AssemblyName>
+    <RootNamespace>Astra.Chain</RootNamespace>
+    <OutputType>Library</OutputType>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Nullable>disable</Nullable>
+    <!-- Doorstop's CoreCLR host finds our Start() by coreclr_create_delegate(host, domain_id,
+         "Astra.Chain.CoreCLR", "Doorstop.Entrypoint", "Start", …) — a hosting-API lookup, not the
+         PE/CorFlags entry-point token — so this stays an ordinary class library. -->
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- ChainIni.cs is pure System.IO/System.Text text parsing with no Mono- or CoreCLR-specific
+         API; shared verbatim with Astra.Chain (never duplicated — see that project's own copy). -->
+    <Compile Include="../Astra.Chain/ChainIni.cs" Link="ChainIni.cs" />
+  </ItemGroup>
+</Project>
