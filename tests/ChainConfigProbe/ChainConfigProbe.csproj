@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A second fixture for tools/test-chain.sh, kept separate from tests/ChainFixtures on purpose:
+       this one is placed in ASTRA'S OWN plugins folder (so Astra.Chain.Hooks' FindPluginTypes
+       postfix discovers it as "mine"), where ChainFixtures' plugins must stay "theirs". Its Awake
+       SETS a config value (an explicit write, not just a bind-read) so the ConfigFile ctor prefix
+       (design §4.4 #3) has something real to redirect: the written .cfg must land in Astra's own
+       profile, never the player's, even though Paths.ConfigPath points at theirs when this plugin
+       is constructed. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>ChainConfigProbe</AssemblyName>
+    <RootNamespace>ChainConfigProbe</RootNamespace>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" PrivateAssets="all" />
+    <PackageReference Include="UnityEngine.Modules" Version="2021.3.45" IncludeAssets="compile" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

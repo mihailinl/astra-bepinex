@@ -8,6 +8,21 @@ authors = ["mihailinl"]
 license = "MIT"
 repo = "https://github.com/mihailinl/astra-bepinex"
 
+# Play together with the player's own BepInEx (their mod manager's profile, or a BepInEx in the game
+# folder): a launcher that understands this plays Doorstop on `chain` instead of the preloader, which
+# hands the game to THEIR preloader and adds this profile's BepInEx/plugins (docs/GAME-INTEGRATION-
+# MANIFEST.md §7). Nested under [integration] ON PURPOSE, not a top-level [mods] table: every
+# unknown key directly under [target]/[[files]]/[[game_files]]/[launch]/[[config_writes]] is
+# refused by every launcher, but [integration] is metadata, read with no key check at all (it is
+# only checked for being a table, then deserialized with unknown fields silently dropped — verified
+# against astra-game-launcher 9aa7874's src/manifest.rs). So an OLDER launcher installs this exact
+# runner release and plays Astra-only, exactly as today; only a launcher that knows to read
+# integration.mods offers "play with mods".
+[integration.mods]
+loader = "bepinex5"
+chain = "${profile}/chain/Astra.Chain.dll"
+chain_config = "${profile}/chain/chain.ini"
+
 [target]                           # a RUNNER: any Unity (Mono) game the user picks
 engine = "unity-mono"
 exe = "*"                          # the user picks the game; the launcher checks it is Unity Mono
@@ -22,6 +37,10 @@ to = "${profile}/BepInEx/core/"
 [[files]]
 from = "BepInEx/plugins/**"        # the foundation (Astra/) alone: no per-game integration
 to = "${profile}/BepInEx/plugins/"
+
+[[files]]
+from = "chain/**"                  # Astra.Chain.dll + Astra.Chain.Hooks.dll: only used when a
+to = "${profile}/chain/"           # launcher plays "with mods"; harmless extra files otherwise
 
 # Beside the game's exe — the only files that touch the game folder. Each one is on the consent
 # sheet, pinned by its digest, backed up if it replaces a game file and restored on uninstall.

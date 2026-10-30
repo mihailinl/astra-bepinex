@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Fixture plugins for tools/test-chain.sh (the mods-chain design's test 2). These stand in for
+       "the player's own mods": plain BepInEx 5 plugins with NO reference to Astra at all (not even
+       compile-only), placed in a scratch copy of a real pack's plugins/ folder. They prove:
+         - FixtureMod: THEIR BepInEx actually ran (reads a config value FROM THEIR PROFILE, which
+           only their own BepInEx.Configuration.ConfigFile.ctor — unpatched for a non-Astra GUID —
+           would have read untouched).
+         - SemverMod: a plugin version string stock BepInEx rejects ("1.0.0-beta.1") loads only
+           under a fork that accepts semver (the Valheim pack) — proof THEIR core, not a stock one
+           Astra might have substituted, is what is actually running.
+         - StaleAstra: a second copy of the foundation's OWN GUID (astra.unity-foundation). It must
+           never reach Awake() once Astra.Chain.Hooks is installed (design §4.4's dedupe-by-GUID). -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>ChainFixtures</AssemblyName>
+    <RootNamespace>ChainFixtures</RootNamespace>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" PrivateAssets="all" />
+    <PackageReference Include="UnityEngine.Modules" Version="2021.3.45" IncludeAssets="compile" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

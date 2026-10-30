@@ -207,3 +207,65 @@ on a tag; the four integrations under `github.com/mihailinl/astra-*` use an olde
 It then downloads the foundation's pinned release zip (which carries BepInEx's official release;
 the older form downloads BepInEx on its own), verifies its digest, lays out the zip as in §3 and
 attaches it to the release.
+
+## 7. Playing together with the player's own mods
+
+A BepInEx integration (the runner, or any per-game one built on it) can carry a second, OPTIONAL
+`[integration.mods]` table. It changes nothing about how Astra plays by itself; it only gives a
+launcher that understands it the means to instead run Astra **alongside** the player's own mods —
+their mod manager's profile (r2modman, Thunderstore Mod Manager, Gale) or a hand-installed BepInEx
+in the game folder — rather than in Astra's own, separate BepInEx. The full design is
+`astra-companion`'s research note (private; the shape that matters here is below).
+
+```toml
+[integration.mods]
+loader = "bepinex5"                              # "bepinex6-il2cpp" for an IL2CPP integration
+chain = "${profile}/chain/Astra.Chain.dll"       # IL2CPP: "${profile}/chain/Astra.Chain.CoreCLR.dll"
+chain_config = "${profile}/chain/chain.ini"      # the launcher writes it at every Play with mods
+```
+
+Plus a files rule that places the chain loader's two DLLs:
+
+```toml
+[[files]]
+from = "chain/**"
+to = "${profile}/chain/"
+```
+
+**Why nested under `[integration]`, never a top-level `[mods]`.** §3's rule is absolute: an
+unknown key directly under `[target]`, `[[files]]`, `[[game_files]]`, `[launch]` or
+`[[config_writes]]` is refused outright — a newer feature an older launcher read as nothing would
+make an install that looks fine and is broken. A top-level `[mods]` table would be exactly that
+kind of unknown key to every launcher built before this feature, and would break them outright on
+this integration's very next release. `[integration]` is different: it is metadata, read with no
+key check at all — an unknown field or table inside it is silently dropped. So an integration can
+publish `[integration.mods]` the moment it is ready, and:
+
+- an **older launcher** installs the same release and plays Astra on its own, exactly as before —
+  it never even notices the table is there;
+- a **launcher that reads `integration.mods`** can additionally offer "play with your mods",
+  pointing Doorstop at `chain` instead of the usual preloader and writing `chain_config` under the
+  profile lock at every Play (the launcher fills in `chain_config`'s `target`/`source`/`profile`
+  from whichever mod source the player picked; `chain` itself never changes).
+
+This is the one escape from the "unknown key refused" rule in this whole document, and it exists
+for exactly this reason: a capability that is additive for the player (nothing of theirs is ever
+touched; §4.4 of the design keeps their config, cache and plugins untouched) must also be additive
+for every launcher already in the field.
+
+**`chain.ini`** (UTF-8, no BOM), written at the path `chain_config` names:
+
+```ini
+[Chain]
+target = Z:\home\u\.local\share\com.kesomannen.gale\peak\profiles\Default\BepInEx\core\BepInEx.Preloader.dll
+source = gale          ; r2modman | thunderstore | gale | manual — for the log only
+profile = Default      ; for the log only
+```
+
+`target` must be an existing `BepInEx.Preloader.dll` inside a `BepInEx/core` folder — the player's
+own preloader, wherever their mod manager put it. The chain loader (`Astra.Chain.dll`) hands the
+whole process to it exactly as their own manager would (Doorstop's own `Doorstop.Entrypoint.Start()`
+ABI), then folds Astra's plugins into their discovery and keeps every Astra plugin's config in
+Astra's own profile. Anything wrong with `target` (missing, renamed, a stale path from an uninstalled
+mod source) makes the chain loader fall back to Astra's own preloader instead — an ordinary,
+Astra-only session, never a failure to start.

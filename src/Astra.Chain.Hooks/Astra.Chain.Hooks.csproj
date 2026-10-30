@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Astra.Chain's second half (design §4.3 step 5, §4.4), loaded via Assembly.LoadFrom only AFTER
+       the player's own BepInEx preloader has run — so BepInEx.dll, 0Harmony.dll and Mono.Cecil.dll
+       all bind to THEIR copies by simple name (the same loose, unsigned-assembly binding every
+       BepInEx plugin relies on to run against a BepInEx core newer or older than it was built
+       against). Compiled against the stable BepInEx 5.4 plugin API + HarmonyX + the Mono.Cecil
+       shape BepInEx 5.4.x has used unchanged for years (AssemblyResolveEventHandler,
+       AssemblyNameReference) — nothing here is shipped; it is all PrivateAssets="all". -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Astra.Chain.Hooks</AssemblyName>
+    <RootNamespace>Astra.Chain</RootNamespace>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" PrivateAssets="all" />
+    <PackageReference Include="HarmonyX" Version="2.7.0" PrivateAssets="all" />
+    <PackageReference Include="Mono.Cecil" Version="0.11.4" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

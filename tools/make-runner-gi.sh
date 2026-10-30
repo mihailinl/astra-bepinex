@@ -30,9 +30,10 @@ if [ -z "${BEPINEX_DIST:-}" ]; then
   echo "$BEPINEX_SHA256  $OUT/bie.zip" | sha256sum -c --quiet
   unzip -q "$OUT/bie.zip" -d "$BEPINEX_DIST"
 fi
-Z="$OUT/zip"; mkdir -p "$Z/BepInEx/core" "$Z/BepInEx/plugins" "$Z/licenses"
+Z="$OUT/zip"; mkdir -p "$Z/BepInEx/core" "$Z/BepInEx/plugins" "$Z/chain" "$Z/licenses"
 cp -r "$BEPINEX_DIST/BepInEx/core/." "$Z/BepInEx/core/"
 cp -r artifacts/foundation-mono/BepInEx/plugins/Astra "$Z/BepInEx/plugins/Astra"
+cp artifacts/chain-mono/Astra.Chain.dll artifacts/chain-mono/Astra.Chain.Hooks.dll "$Z/chain/"
 cp "$BEPINEX_DIST/winhttp.dll" "$Z/winhttp.dll"
 cp runner/doorstop_config.ini "$Z/doorstop_config.ini"
 cp LICENSE "$Z/licenses/astra-foundation-LICENSE.txt"
