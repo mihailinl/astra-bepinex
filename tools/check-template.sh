@@ -8,6 +8,13 @@
 # --debug:custom-hive), never into yours.
 #
 # Usage: tools/check-template.sh
+#   ASTRA_GAME_LAUNCHER_REPO  astra-game-launcher's checkout, built fresh into a scratch target dir
+#                             and never written to (default: ../astra-game-launcher). Its `inspect`
+#                             is run against the packed zip below — a real launcher check, not just
+#                             "does this TOML parse": a [[files]] rule matching nothing in the zip
+#                             (e.g. a chain/** rule the pinned runner release does not ship yet) is
+#                             "not in the zip" to the launcher and would get every integration built
+#                             from this template refused at install. Missing the repo prints SKIP.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$(pwd)
@@ -26,6 +33,13 @@ new mono mono
 new il2cpp il2cpp
 new gamedir mono --gameDir '/games/A & B "c"'
 new exe mono --exe 'bin\Game "x".exe'
+# A SECOND, clean-named Mono instance for the real launcher check below: the hostile GAME name's
+# `<`/`>` (deliberately picked to stress TOML/C#/XML escaping) makes `target.exe` a string no
+# Windows filename could ever hold, which the real launcher correctly refuses
+# (astra-game-launcher's check_component: `<>:"|?*\` are illegal there) — a fact about Windows
+# paths, not about this template, so it gets its own instance instead of weakening the hostile one.
+dotnet new astra-integration "${HIVE[@]}" -o "$W/launchercheck" -n LauncherCheck --game 'LauncherCheckGame' \
+  --runtime mono --steamAppId 1234560 --owner Some-One --id astra.launchercheck > "$W/launchercheck.out"
 
 # Refused: an id or owner that is not one is never rewritten into another; nothing is written.
 refused() { # refused <dir> <what the output must name> <options…>
@@ -84,4 +98,27 @@ echo "workflow: OK"
   unzip -l astra-gi.zip | grep -q 'BepInEx/plugins/AstraHostile/AstraHostile.dll'
 ) || fail "the Mono project did not build and pack"
 echo "build and zip: OK"
+
+# The launcher itself, not just a TOML parse: a [[files]] rule matching nothing in the zip is
+# refused outright (astra-game-launcher's package.rs, "not in the zip") — the exact mistake that
+# shipped [integration.mods] + chain/** pinned to a runner release with no chain/ in its zip.
+LAUNCHER_REPO=${ASTRA_GAME_LAUNCHER_REPO:-"$REPO/../astra-game-launcher"}
+if [ -d "$LAUNCHER_REPO" ]; then
+  ( cd "$LAUNCHER_REPO" && CARGO_TARGET_DIR="$W/launcher-build" cargo build --release -q ) \
+    || fail "astra-game-launcher ($LAUNCHER_REPO) did not build"
+  LAUNCHER_BIN="$W/launcher-build/release/astra-game-launcher"
+  (
+    cd "$W/launchercheck"
+    bash tools/fetch.sh >/dev/null
+    dotnet build -c Release -p:TreatWarningsAsErrors=true -v q > build.log 2>&1 || { tail -20 build.log >&2; exit 1; }
+    bash tools/make-astra-gi.sh >/dev/null
+  ) || fail "the launcher-check project did not build and pack"
+  ZIP="$W/launchercheck/astra-gi.zip"
+  SHA=$(sha256sum "$ZIP" | cut -d' ' -f1)
+  OUT=$("$LAUNCHER_BIN" inspect "$ZIP" --sha256 "$SHA" --json 2>&1) \
+    || fail "astra-game-launcher refused the packed template zip: $OUT"
+  echo "launcher inspect: OK"
+else
+  echo "SKIP: launcher inspect ($LAUNCHER_REPO not found; set ASTRA_GAME_LAUNCHER_REPO)"
+fi
 echo "check-template: OK"

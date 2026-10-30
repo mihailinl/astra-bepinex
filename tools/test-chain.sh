@@ -184,6 +184,9 @@ while IFS='|' read -r name reldir semver; do
   has "$LOG" "with your mods: manual" && has "$LOG" "$name-profile" \
     && pass "$name: the foundation's own 'with your mods' line printed, with chain.ini's labels" \
     || fail "$name: no (or wrong) 'Astra ... with your mods' line"
+  has "$LOG" "DependsOnAstra loaded" \
+    && pass "$name: a per-game integration fixture with [BepInDependency] on the foundation loaded" \
+    || fail "$name: DependsOnAstra (depends on astra.unity-foundation, merged in by the chain) did not load"
   if [ "$semver" = yes ]; then
     has "$LOG" "SemverMod loaded" && pass "$name: SemverMod loaded (this pack's fork accepts semver)" \
       || fail "$name: SemverMod did not load under the Valheim fork"
@@ -243,6 +246,68 @@ has "$LAST" "fallback " && pass "fallback: last-run.txt says fallback ($(cat "$L
   || fail "fallback: Astra's own session did not come up"
 hasnt "$LOG" "with your mods" && pass "fallback: no 'with your mods' line (this IS Astra's own root)" \
   || fail "fallback: 'with your mods' printed during a fallback session"
+
+GENERIC_PACK="$PACKS_ROOT/BepInEx-BepInExPack-5.4.2305/BepInExPack"
+
+echo "== malformed chain.ini: no [Chain] section at all → real fallback =="
+ASTRA_DIR="$SCRATCH/astra-malformed"
+make_astra_profile "$ASTRA_DIR"
+printf '[NotChain]\nValue = whatever\n' > "$ASTRA_DIR/chain/chain.ini"
+run_testbed "$ASTRA_DIR" "malformed" || true
+LAST="$ASTRA_DIR/chain/last-run.txt"
+LOG="$ASTRA_DIR/BepInEx/LogOutput.log"
+has "$LAST" "fallback " && pass "malformed chain.ini: falls back ($(cat "$LAST"))" \
+  || fail "malformed chain.ini: last-run.txt: $(cat "$LAST" 2>&1)"
+[ -f "$LOG" ] && has "$LOG" "Loading [Astra " && pass "malformed chain.ini: Astra's own session still came up" \
+  || fail "malformed chain.ini: Astra's own session did not come up"
+
+echo "== broken core: BepInEx.dll missing beside a real-looking preloader → real fallback =="
+BROKEN_CORE="$SCRATCH/broken-core/BepInEx/core"
+rm -rf "$SCRATCH/broken-core"; mkdir -p "$BROKEN_CORE"
+cp -r "$GENERIC_PACK/BepInEx/core/." "$BROKEN_CORE/"
+rm -f "$BROKEN_CORE/BepInEx.dll"
+ASTRA_DIR="$SCRATCH/astra-brokencore"
+make_astra_profile "$ASTRA_DIR"
+write_chain_ini "$ASTRA_DIR" "$BROKEN_CORE/BepInEx.Preloader.dll" "manual" "broken-core"
+run_testbed "$ASTRA_DIR" "brokencore" || true
+LAST="$ASTRA_DIR/chain/last-run.txt"
+LOG="$ASTRA_DIR/BepInEx/LogOutput.log"
+has "$LAST" "fallback " && has "$LAST" "BepInEx.dll" \
+  && pass "broken core: ValidateTarget caught the missing BepInEx.dll and fell back ($(cat "$LAST"))" \
+  || fail "broken core: last-run.txt: $(cat "$LAST" 2>&1)"
+[ -f "$LOG" ] && has "$LOG" "Loading [Astra " && pass "broken core: Astra's own session still came up" \
+  || fail "broken core: Astra's own session did not come up"
+
+echo "== postfix failure: ours/plugins missing → their mods still load, hooks-failed (not ok) =="
+ASTRA_DIR="$SCRATCH/astra-nopluginsdir"
+THEIR_DIR="$SCRATCH/their-nopluginsdir"
+make_astra_profile "$ASTRA_DIR"
+rm -rf "$ASTRA_DIR/BepInEx/plugins"
+make_their_profile "$THEIR_DIR" "$GENERIC_PACK" "from-nopluginsdir-profile"
+write_chain_ini "$ASTRA_DIR" "$THEIR_DIR/BepInEx/core/BepInEx.Preloader.dll" "manual" "nopluginsdir"
+run_testbed "$ASTRA_DIR" "nopluginsdir" || true
+LAST="$ASTRA_DIR/chain/last-run.txt"
+LOG="$THEIR_DIR/BepInEx/LogOutput.log"
+has "$LAST" "hooks-failed " && pass "postfix failure: last-run.txt says hooks-failed, not ok ($(cat "$LAST"))" \
+  || fail "postfix failure: last-run.txt: $(cat "$LAST" 2>&1)"
+[ -f "$LOG" ] && has "$LOG" "Loading [FixtureMod" && has "$LOG" "FixtureMod value=from-nopluginsdir-profile" \
+  && pass "postfix failure: their own mods still loaded, untouched" \
+  || fail "postfix failure: their mods did not load"
+
+echo "== a profile name with # (comment-stripping regression, review S3) =="
+ASTRA_DIR="$SCRATCH/astra-hashname"
+THEIR_DIR="$SCRATCH/their-hashname"
+make_astra_profile "$ASTRA_DIR"
+make_their_profile "$THEIR_DIR" "$GENERIC_PACK" "from-hashname-profile"
+write_chain_ini "$ASTRA_DIR" "$THEIR_DIR/BepInEx/core/BepInEx.Preloader.dll" "gale" "My #1"
+run_testbed "$ASTRA_DIR" "hashname" || true
+LAST="$ASTRA_DIR/chain/last-run.txt"
+LOG="$THEIR_DIR/BepInEx/LogOutput.log"
+has "$LAST" "ok " && pass "profile name with #: the chain still succeeds ($(cat "$LAST"))" \
+  || fail "profile name with #: last-run.txt: $(cat "$LAST" 2>&1)"
+[ -f "$LOG" ] && has "$LOG" "My #1" \
+  && pass "profile name with #: the whole name (including the #) reached the foundation's log line" \
+  || fail "profile name with #: 'My #1' did not appear whole in the log (a stale comment-stripping bug would truncate it to 'My ')"
 
 echo "== launcher compatibility: astra-game-launcher 9aa7874 still accepts [integration.mods] =="
 if [ -d "$LAUNCHER_REPO" ]; then

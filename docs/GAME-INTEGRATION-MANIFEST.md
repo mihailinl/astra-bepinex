@@ -262,10 +262,23 @@ source = gale          ; r2modman | thunderstore | gale | manual — for the log
 profile = Default      ; for the log only
 ```
 
-`target` must be an existing `BepInEx.Preloader.dll` inside a `BepInEx/core` folder — the player's
-own preloader, wherever their mod manager put it. The chain loader (`Astra.Chain.dll`) hands the
-whole process to it exactly as their own manager would (Doorstop's own `Doorstop.Entrypoint.Start()`
-ABI), then folds Astra's plugins into their discovery and keeps every Astra plugin's config in
-Astra's own profile. Anything wrong with `target` (missing, renamed, a stale path from an uninstalled
-mod source) makes the chain loader fall back to Astra's own preloader instead — an ordinary,
-Astra-only session, never a failure to start.
+`target` must be an existing `BepInEx.Preloader.dll` inside a `BepInEx/core` folder that also holds
+`BepInEx.dll`, `0Harmony.dll` and `Mono.Cecil.dll` — the player's own preloader, wherever their mod
+manager put it. The chain loader (`Astra.Chain.dll`) hands the whole process to it exactly as their
+own manager would (Doorstop's own `Doorstop.Entrypoint.Start()` ABI, or a pre-5.4.20 preloader's own
+static `Main()`), then folds Astra's plugins into their discovery and keeps every Astra plugin's
+config in Astra's own profile. Anything wrong with `target` or a broken/partial core (missing,
+renamed, a stale path from an uninstalled mod source) makes the chain loader fall back to Astra's
+own preloader instead — an ordinary, Astra-only session, never a failure to start. A failure AFTER
+the hand-off (folding Astra's plugins into theirs) is reported as `hooks-failed` in
+`chain/last-run.txt`, never `fallback` — their preloader already ran under their own BepInEx by
+then, so there is no "Astra's own session" to fall back to; Astra is simply missing from that one
+session.
+
+**A plugin's `ConfigFile` must be built with its owner metadata to be redirected.** The hook that
+keeps every Astra plugin's config in Astra's own profile patches `ConfigFile`'s 3-argument
+constructor (`configPath, saveOnInit, ownerMetadata`) — the one `BaseUnityPlugin` itself uses. A
+plugin (Astra's own, or a per-game integration on the foundation) that constructs a SECOND
+`ConfigFile` by hand with the 2-argument constructor (no owner metadata) gets no redirect: that
+file is written wherever `configPath` says, which under a chained session is the player's profile.
+Always pass the plugin's own `BepInPlugin` metadata.

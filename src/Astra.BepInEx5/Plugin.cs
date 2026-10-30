@@ -2,7 +2,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Reflection;
 using BepInEx;
 using UnityEngine;
 
@@ -27,16 +26,21 @@ namespace Astra.Unity
         /// (<see cref="Paths.BepInExRootPath"/>), the chain loader handed the process to the
         /// PLAYER's own BepInEx instead of Astra's — one line in THEIR LogOutput.log, where their
         /// mod manager's users look, says so. An ordinary standalone session (today's, unchanged)
-        /// prints nothing here.</summary>
+        /// prints nothing here.
+        ///
+        /// Astra's own root comes from `ASTRA_CHAIN_OWN_ROOT`, set only by
+        /// `Astra.Chain.Hooks.Install` from the SAME non-mangled path Astra.Chain itself derived
+        /// from `DOORSTOP_INVOKE_DLL_PATH` before overwriting it with THEIR target — never
+        /// `Assembly.Location`, which Mono mangles for a non-ASCII install path (the chained case
+        /// Astra's players actually hit). The variable is simply absent in an ordinary,
+        /// unchained session, so this prints nothing without ever comparing anything.</summary>
         void LogIfRunningWithMods()
         {
             try
             {
-                string ownDll = Assembly.GetExecutingAssembly().Location;
-                // <profile>/BepInEx/plugins/Astra/Astra.Unity.dll -> Astra -> plugins -> BepInEx.
-                string ownRoot = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(ownDll)));
+                string ownRoot = Environment.GetEnvironmentVariable("ASTRA_CHAIN_OWN_ROOT");
                 string theirRoot = Paths.BepInExRootPath;
-                if (ownRoot == null || theirRoot == null || SamePath(ownRoot, theirRoot))
+                if (string.IsNullOrEmpty(ownRoot) || theirRoot == null || SamePath(ownRoot, theirRoot))
                     return;
 
                 string source = Environment.GetEnvironmentVariable("ASTRA_CHAIN_SOURCE") ?? "unknown";

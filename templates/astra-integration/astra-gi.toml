@@ -9,16 +9,13 @@ version = "0.1.0"                  # = <Version> in AstraIntegration.csproj and 
 authors = ["GITHUB_OWNER"]
 license = "MIT"                    # = LICENSE
 repo = "https://github.com/GITHUB_OWNER/AstraIntegration"
-#if (mono)
-
-# Play together with the player's own BepInEx (docs/GAME-INTEGRATION-MANIFEST.md §7). Nested under
-# [integration], never a top-level [mods]: every launcher ignores unknown [integration] keys, so an
-# older one still installs this release and plays Astra-only; only a with-mods-aware one reads this.
-[integration.mods]
-loader = "bepinex5"
-chain = "${profile}/chain/Astra.Chain.dll"
-chain_config = "${profile}/chain/chain.ini"
-#endif
+# [integration.mods] (play together with the player's own BepInEx, docs/GAME-INTEGRATION-
+# MANIFEST.md §7) is NOT here yet: this template is pinned to a runner release whose zip has no
+# chain/ (tools/pin-template.sh only moves the pin forward once v<version> is published), and the
+# launcher refuses a [[files]] rule that matches nothing in the zip (astra-game-launcher
+# package.rs: "not in the zip"). It comes back together with the next pin to a runner release that
+# actually ships chain/ — tools/check-template.sh's launcher `inspect` step is what catches this
+# class of mistake before it reaches a release.
 
 [target]                           # which game
 steam_appid = 0000000
@@ -40,12 +37,6 @@ to = "${profile}/dotnet/"
 [[files]]
 from = "BepInEx/plugins/**"        # the foundation (Astra/) AND this integration (AstraIntegration/)
 to = "${profile}/BepInEx/plugins/"
-#if (mono)
-
-[[files]]
-from = "chain/**"                  # Astra.Chain.dll + Astra.Chain.Hooks.dll (play-with-mods only;
-to = "${profile}/chain/"           # harmless extra files otherwise). No IL2CPP chain loader yet.
-#endif
 
 # Beside the game's exe — the only files that touch the game folder. Each one is on the consent
 # sheet, pinned by its digest, backed up if it replaces a game file and restored on uninstall.

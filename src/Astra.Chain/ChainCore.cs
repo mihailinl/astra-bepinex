@@ -92,8 +92,11 @@ namespace Astra.Chain
             catch (Exception ex)
             {
                 // Astra is simply missing from this session (its plugins were never folded into
-                // theirs); the game and the player's own mods are unaffected.
-                WriteLastRun(chainDir, "fallback", "hooks-install: " + Unwrap(ex).Message);
+                // theirs); the game and the player's own mods are unaffected. This is NOT a
+                // fallback — their preloader already ran under their own BepInEx, so this is its
+                // own, later status: "hooks-failed", never "fallback" (which means Astra ran its
+                // OWN preloader instead, which did not happen here).
+                WriteLastRun(chainDir, "hooks-failed", Unwrap(ex).Message);
             }
         }
 
@@ -112,20 +115,33 @@ namespace Astra.Chain
         }
 
         /// <summary>`target` must be an existing `BepInEx.Preloader.dll` inside a `BepInEx/core`
-        /// folder (design §4.3 step 2) — never anything else, however it got into chain.ini.</summary>
+        /// folder that also holds `BepInEx.dll`, `0Harmony.dll` and `Mono.Cecil.dll` (design §4.3
+        /// step 2) — never anything else, however it got into chain.ini. A core missing any of
+        /// those cannot actually load a plugin even once invoked, so this is checked BEFORE their
+        /// Start() is ever called: a broken core takes the real fallback (Astra's own session),
+        /// not a half-started one. None of these messages say "chain.ini:" themselves — the one
+        /// caller that reports them (<see cref="Describe"/>) adds that prefix once.</summary>
         static void ValidateTarget(string target)
         {
             if (string.IsNullOrEmpty(target) || !File.Exists(target))
-                throw new FileNotFoundException("chain.ini: target does not exist", target);
+                throw new FileNotFoundException("target does not exist", target);
             if (!string.Equals(Path.GetFileName(target), "BepInEx.Preloader.dll", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException("chain.ini: target is not named BepInEx.Preloader.dll: " + target);
+                throw new InvalidDataException("target is not named BepInEx.Preloader.dll: " + target);
             string coreDir = Path.GetDirectoryName(target);
             if (coreDir == null || !string.Equals(Path.GetFileName(coreDir), "core", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException("chain.ini: target is not inside a 'core' folder: " + target);
+                throw new InvalidDataException("target is not inside a 'core' folder: " + target);
             string bepinexDir = Path.GetDirectoryName(coreDir);
             if (bepinexDir == null || !string.Equals(Path.GetFileName(bepinexDir), "BepInEx", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException("chain.ini: target is not inside a 'BepInEx' folder: " + target);
+                throw new InvalidDataException("target is not inside a 'BepInEx' folder: " + target);
+            foreach (string name in RequiredCoreFiles)
+            {
+                string path = Path.Combine(coreDir, name);
+                if (!File.Exists(path))
+                    throw new FileNotFoundException("their core is missing " + name, path);
+            }
         }
+
+        static readonly string[] RequiredCoreFiles = { "BepInEx.dll", "0Harmony.dll", "Mono.Cecil.dll" };
 
         /// <summary>Loads `assemblyPath` and finds its Doorstop entry method by reflection, so it
         /// binds whatever preloader is actually there (stock, forked, ours) without this assembly
