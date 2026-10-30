@@ -8,23 +8,23 @@ authors = ["mihailinl"]
 license = "MIT"
 repo = "https://github.com/mihailinl/astra-bepinex"
 
-# Play together with the player's own BepInEx 6 (their mod manager's profile, or a hand-installed
-# BepInEx in the game folder): a launcher that understands this plays Doorstop's CoreCLR host on
-# `chain` instead of the preloader, which hands the game to THEIR BepInEx.Unity.IL2CPP.dll and adds
-# this profile's BepInEx/plugins (docs/GAME-INTEGRATION-MANIFEST.md §7). Nested under [integration]
-# for the same reason the Mono runner's is (runner/astra-gi.toml's own comment): every unknown key
-# directly under [target]/[[files]]/[[game_files]]/[launch]/[[config_writes]] is refused outright,
-# but [integration] is metadata, read with no key check at all.
-# `bepinex_build` is the EXACT be.xxx build this chain is compiled for (BepInEx 6 is pre-1.0; its
-# internal APIs are not guaranteed stable between builds the way BE5's plugin API is across 5.4.x) —
-# a launcher offers "with mods" only when the source profile's BepInEx.Core.dll ProductVersion
-# starts with "6.0.0-be.<bepinex_build>"; the chain loader itself re-checks this and falls back to
-# Astra's own session otherwise (design §9, Astra.Chain.CoreCLR/ChainCore.cs ValidateTarget).
-[integration.mods]
-loader = "bepinex6-il2cpp"
-bepinex_build = 788
-chain = "${profile}/chain/Astra.Chain.CoreCLR.dll"
-chain_config = "${profile}/chain/chain.ini"
+# GATED OFF for release, review fix #5 (2026-10-30): no [integration.mods] table here yet, so no
+# launcher offers "play with your mods" for an IL2CPP game. The chain loader (Astra.Chain.CoreCLR +
+# Astra.Chain.Hooks.IL2CPP, see the [[files]] "chain/**" rule below — those two DLLs stay packaged,
+# inert extra files with nothing pointing a launcher at them) and its headless tests
+# (tools/test-chain-il2cpp.sh) are done and green, but BepInEx 6's own IL2CPPChainloader has never
+# been run end to end through this chain on a real Windows host — this sandboxed Linux host's
+# testbed crashes in BepInEx 6's own native runtime-invoke detour before Execute()/DiscoverPlugins
+# are ever reached (see that script's own header), so the handoff has only ever been proven to hand
+# off cleanly, never that a real IL2CPPChainloader session plays correctly end to end. Restore the
+# table below (docs/GAME-INTEGRATION-MANIFEST.md §7 has its exact shape) once that run has happened.
+# The BE5/Mono runner's own [integration.mods] (runner/astra-gi.toml) is unaffected.
+#
+# [integration.mods]
+# loader = "bepinex6-il2cpp"
+# bepinex_build = 788
+# chain = "${profile}/chain/Astra.Chain.CoreCLR.dll"
+# chain_config = "${profile}/chain/chain.ini"
 
 [target]                           # a RUNNER: any Unity IL2CPP game the user picks
 engine = "unity-il2cpp"

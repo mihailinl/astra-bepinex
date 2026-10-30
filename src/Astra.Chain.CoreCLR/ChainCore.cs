@@ -60,7 +60,7 @@ namespace Astra.Chain
                     target = ini.Target;
                     if (!string.IsNullOrEmpty(ini.Source)) source = ini.Source;
                     if (!string.IsNullOrEmpty(ini.Profile)) profile = ini.Profile;
-                    ValidateTarget(target);
+                    ValidateTarget(target, ours);
                     theirEntry = FindEntrypoint(target);
                 }
                 catch (Exception ex)
@@ -158,15 +158,21 @@ namespace Astra.Chain
         }
 
         /// <summary>`target` must be an existing `BepInEx.Unity.IL2CPP.dll` inside a `BepInEx/core`
-        /// folder that also holds the rest of be.788's core assemblies, AND whose `BepInEx.Core.dll`
-        /// reports the EXACT build this chain is built for (design §9: "allowed only when their
-        /// BepInEx 6 is the exact build the runner is built for" — BepInEx 6 is pre-1.0 and its
-        /// internal APIs, which Astra.Chain.Hooks.IL2CPP patches directly, are not guaranteed stable
-        /// between be.xxx builds the way BE5's plugin API is across 5.4.x). Checked BEFORE their
-        /// Start() is ever called: a wrong or broken core takes the real fallback (Astra's own
-        /// session), not a half-started one. None of these messages say "chain.ini:" themselves —
-        /// the one caller that reports them (<see cref="Describe"/>) adds that prefix once.</summary>
-        static void ValidateTarget(string target)
+        /// folder that also holds the rest of be.788's core assemblies — EVERY file name present in
+        /// OUR own `<paramref name="ours"/>/core` (the exact be.788 drop
+        /// tools/make-runner-il2cpp-gi.sh ships beside chain/, ~35 files) must also exist in theirs,
+        /// not just a hand-picked handful: a partial core (e.g. Il2CppInterop.Runtime.dll missing)
+        /// used to pass a 5-file gate and then hand off to a preloader that loads nothing. AND their
+        /// `BepInEx.Core.dll` must report the EXACT build this chain is built for (design §9:
+        /// "allowed only when their BepInEx 6 is the exact build the runner is built for" — BepInEx 6
+        /// is pre-1.0 and its internal APIs, which Astra.Chain.Hooks.IL2CPP patches directly, are not
+        /// guaranteed stable between be.xxx builds the way BE5's plugin API is across 5.4.x), compared
+        /// EXACTLY on the text before '+' (not by prefix: "6.0.0-be.788" must not also accept
+        /// "6.0.0-be.7880"). Checked BEFORE their Start() is ever called: a wrong or broken core takes
+        /// the real fallback (Astra's own session), not a half-started one. None of these messages say
+        /// "chain.ini:" themselves — the one caller that reports them (<see cref="Describe"/>) adds
+        /// that prefix once.</summary>
+        static void ValidateTarget(string target, string ours)
         {
             if (string.IsNullOrEmpty(target) || !File.Exists(target))
                 throw new FileNotFoundException("target does not exist", target);
@@ -178,28 +184,27 @@ namespace Astra.Chain
             string bepinexDir = Path.GetDirectoryName(coreDir);
             if (bepinexDir == null || !string.Equals(Path.GetFileName(bepinexDir), "BepInEx", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("target is not inside a 'BepInEx' folder: " + target);
-            foreach (string name in RequiredCoreFiles)
+            string ownCoreDir = Path.Combine(ours, "core");
+            string[] ownNames = Array.ConvertAll(Directory.GetFiles(ownCoreDir), Path.GetFileName);
+            Array.Sort(ownNames, StringComparer.Ordinal); // deterministic "first missing file" below
+            foreach (string name in ownNames)
             {
                 string path = Path.Combine(coreDir, name);
                 if (!File.Exists(path))
                     throw new FileNotFoundException("their core is missing " + name, path);
             }
             string theirVersion = ReadProductVersion(Path.Combine(coreDir, "BepInEx.Core.dll"));
-            if (theirVersion == null || !theirVersion.StartsWith(RequiredBuild, StringComparison.Ordinal))
+            string theirVersionBase = theirVersion == null ? null : theirVersion.Split('+')[0];
+            if (theirVersionBase == null || !string.Equals(theirVersionBase, RequiredBuild, StringComparison.Ordinal))
                 throw new InvalidDataException("their BepInEx.Core build is " +
                     (theirVersion ?? "unknown") + ", not " + RequiredBuild +
                     " — Astra's IL2CPP chain is built for that exact build only");
         }
 
-        static readonly string[] RequiredCoreFiles =
-        {
-            "BepInEx.Core.dll", "BepInEx.Preloader.Core.dll", "BepInEx.Unity.Common.dll",
-            "0Harmony.dll", "Mono.Cecil.dll"
-        };
-
         // The exact build the runner (and Astra.Chain.Hooks.IL2CPP) is compiled against —
-        // tools/make-runner-il2cpp-gi.sh's own BEPINEX6_URL/BEPINEX6_SHA256 pin. Checked by PREFIX
-        // (not equality) so the trailing "+<commit sha>" never has to be spelled here twice.
+        // tools/make-runner-il2cpp-gi.sh's own BEPINEX6_URL/BEPINEX6_SHA256 pin. Compared EXACTLY
+        // against the version text before '+' (ValidateTarget) so the trailing "+<commit sha>"
+        // never has to be spelled here twice, and so "...788" never matches "...7880".
         const string RequiredBuild = "6.0.0-be.788";
 
         /// <summary>Loads `assemblyPath` and finds its Doorstop entry method by reflection, so it

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A fake BepInEx.Core.dll for tools/test-chain-il2cpp.sh's "be.7880" scenario (review fix #2:
+       ChainCore.cs's RequiredBuild gate must compare the version text before '+' EXACTLY, not by
+       StartsWith prefix, since "6.0.0-be.788" is a prefix of "6.0.0-be.7880" too). A real be.788
+       BepInEx.Core.dll cannot be made to report "6.0.0-be.7880" without hand-patching its native
+       VERSIONINFO resource — this project stands in for just that ONE file instead: its
+       AssemblyInformationalVersion (AssemblyInfo.cs) is what the Roslyn compiler embeds as the PE's
+       ProductVersion, cross-platform, no Windows-only rc.exe involved — the exact same mechanism
+       the real file's own version string is read through by ChainCore.ReadProductVersion. It has no
+       BepInEx reference and no types: ValidateTarget's file-completeness loop (review fix #1) only
+       needs the FILE to exist at that name, never that it is a real, loadable BepInEx.Core — the
+       test script copies a real be.788 core first (satisfying fix #1) and overwrites just this one
+       file with this fixture's output (exercising fix #2). -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>BepInEx.Core</AssemblyName>
+    <RootNamespace>ChainVersionFixture</RootNamespace>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+</Project>

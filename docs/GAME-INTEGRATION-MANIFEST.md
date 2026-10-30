@@ -284,6 +284,15 @@ plugin (Astra's own, or a per-game integration on the foundation) that construct
 file is written wherever `configPath` says, which under a chained session is the player's profile.
 Always pass the plugin's own `BepInPlugin` metadata.
 
+**Not yet offered for IL2CPP.** `runner/il2cpp/astra-gi.toml` ships NO `[integration.mods]` table
+(the chain/ DLLs below are still packaged — inert extra files until a manifest publishes the table)
+and no launcher can offer "play with your mods" for an IL2CPP game yet. The chain loader itself and
+its headless tests (`tools/test-chain-il2cpp.sh`) are done and green; what is missing is a real
+Windows end-to-end run under the actual `IL2CPPChainloader` (this sandboxed Linux host's testbed
+crashes in BepInEx 6's own native runtime-invoke detour before `Execute()`/`DiscoverPlugins` are
+ever reached — see that script's own header). The BE5/Mono flavour's `[integration.mods]` (plain
+`runner/astra-gi.toml`) is unaffected and stays published.
+
 **The IL2CPP flavour** (`loader = "bepinex6-il2cpp"`, `Astra.Chain.CoreCLR.dll` +
 `Astra.Chain.Hooks.IL2CPP.dll`) hands off to `BepInEx.Unity.IL2CPP.dll` instead of
 `BepInEx.Preloader.dll` — same `Doorstop.Entrypoint.Start()` ABI (confirmed by disassembling the
@@ -293,8 +302,9 @@ real be.788 core: the method is identical in name and shape to BE5's), same fall
 - **The exact-build gate.** BepInEx 6 is pre-1.0; its internal APIs (`BaseChainloader<BasePlugin>
   .DiscoverPlugins`, the `ConfigFile` ctor) are not guaranteed stable between be.xxx builds the way
   BE5's plugin API is across 5.4.x. `target`'s `BepInEx.Core.dll` must report a `ProductVersion`
-  starting with `6.0.0-be.<bepinex_build>` (the manifest's own field, so a future chain pinned to a
-  newer build only has to change one number) — anything else, including a DIFFERENT BepInEx 6 build
+  whose text before `+` is EXACTLY `6.0.0-be.<bepinex_build>` (the manifest's own field, so a
+  future chain pinned to a newer build only has to change one number) — never a prefix match, so
+  `...788` never also accepts `...7880` — anything else, including a DIFFERENT BepInEx 6 build
   (verified against a real `6.0.0-dev+…` V Rising pack), takes the real fallback, never a
   half-started session.
 - **One CoreCLR-only wrinkle.** Doorstop's CoreCLR host fixes `APP_PATHS` exactly once, at process
