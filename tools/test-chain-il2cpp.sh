@@ -210,6 +210,19 @@ if run_handoff_racy "$ASTRA_DIR" "ok"; then
   has "$THEIR_DIR/BepInEx/LogOutput.log" "Chainloader initialized" \
     && pass "ok pack: their real preloader ran deep enough to initialize the chainloader (handoff + AssemblyLoadContext resolution of their core both worked)" \
     || fail "ok pack: their LogOutput.log never shows Chainloader initialized"
+  # Best-effort only: like DiscoverPlugins itself (script header point 1), THEIR plugins loading
+  # far enough to run FoundationStandIn.Load() races the same native runtime-invoke detour crash,
+  # separately from the handoff racing above — "Chainloader initialized" is logged BEFORE that
+  # detour runs, so last-run.txt=ok proves only the handoff, never that their plugins actually
+  # loaded. tools/test-chain-il2cpp.sh's "merge" scenario proves the line deterministically instead
+  # (pure managed code, no native detour at all); this check is a bonus signal when the detour
+  # happens not to crash on this run, never a hard requirement.
+  if has "$THEIR_DIR/BepInEx/LogOutput.log" "with your mods: manual" \
+      && has "$THEIR_DIR/BepInEx/LogOutput.log" "ok-profile"; then
+    pass "ok pack: the foundation's own 'with your mods' line printed in THEIR LogOutput.log, with chain.ini's labels"
+  else
+    hostdep "ok pack: their plugins never loaded far enough to run FoundationStandIn.Load() on this run (same native-detour crash class as script header point 1) — see the merge scenario for a deterministic check of this line"
+  fi
 else
   hostdep "ok pack: BepInEx 6's native runtime-invoke detour crashed this host's testbed on all 3 attempts (script header point 1) — cannot prove ok/fallback here"
 fi
@@ -277,6 +290,12 @@ run_handoff "$ASTRA_DIR" "missing"
 LAST="$ASTRA_DIR/chain/last-run.txt"
 has "$LAST" "fallback " && pass "missing target: falls back ($(cat "$LAST"))" \
   || fail "missing target: last-run.txt: $(cat "$LAST" 2>&1)"
+# A plain run: no chaining happened at all (Astra.Chain.Hooks.Install never ran), so
+# ASTRA_CHAIN_OWN_ROOT is unset and FoundationStandIn's own LogIfRunningWithMods must print nothing
+# — the fallback-session analogue of tools/test-chain.sh's "fallback: no 'with your mods' line".
+hasnt "$ASTRA_DIR/BepInEx/LogOutput.log" "with your mods" \
+  && pass "missing target: no 'with your mods' line on a plain, unchained run" \
+  || fail "missing target: 'with your mods' printed during an unchained fallback session"
 
 echo "== handoff: broken core (BepInEx.Core.dll missing beside a real-looking preloader) =="
 BROKEN_CORE="$SCRATCH/broken-core/BepInEx/core"
@@ -386,6 +405,9 @@ has "$LOG" "DependsOnAstra loaded" && pass "merge: a dependency on a plugin fold
   || fail "merge: DependsOnAstra (depends on astra.unity-foundation, merged in by the chain) did not load"
 has "$LOG" "FoundationStandIn loaded" && pass "merge: the GUID 'ours' owns (astra.unity-foundation) loaded from OUR plugins dir" \
   || fail "merge: FoundationStandIn did not load"
+has "$LOG" "with your mods: manual" && has "$LOG" "mergetest" \
+  && pass "merge: the foundation's own 'with your mods' line printed when the chain actually ran (deterministic — no native detour in this path)" \
+  || fail "merge: no (or wrong) 'Astra ... with your mods' line"
 PROBE_CFG="$DIR/ours/BepInEx/config/astra.chain.config-probe.cfg"
 [ -f "$PROBE_CFG" ] && has "$PROBE_CFG" "written-by-ours" \
   && pass "merge: Astra's own plugin wrote its config into ASTRA's profile" \

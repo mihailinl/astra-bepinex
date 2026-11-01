@@ -13,4 +13,7 @@
   <ItemGroup>
     <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.788" PrivateAssets="all" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Astra.Bridge.Core/Astra.Bridge.Core.csproj" />
+  </ItemGroup>
 </Project>

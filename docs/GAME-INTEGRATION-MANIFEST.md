@@ -284,14 +284,13 @@ plugin (Astra's own, or a per-game integration on the foundation) that construct
 file is written wherever `configPath` says, which under a chained session is the player's profile.
 Always pass the plugin's own `BepInPlugin` metadata.
 
-**Not yet offered for IL2CPP.** `runner/il2cpp/astra-gi.toml` ships NO `[integration.mods]` table
-(the chain/ DLLs below are still packaged — inert extra files until a manifest publishes the table)
-and no launcher can offer "play with your mods" for an IL2CPP game yet. The chain loader itself and
-its headless tests (`tools/test-chain-il2cpp.sh`) are done and green; what is missing is a real
-Windows end-to-end run under the actual `IL2CPPChainloader` (this sandboxed Linux host's testbed
-crashes in BepInEx 6's own native runtime-invoke detour before `Execute()`/`DiscoverPlugins` are
-ever reached — see that script's own header). The BE5/Mono flavour's `[integration.mods]` (plain
-`runner/astra-gi.toml`) is unaffected and stays published.
+**Now offered for IL2CPP too (2026-11-01).** `runner/il2cpp/astra-gi.toml` publishes
+`[integration.mods]` (`loader = "bepinex6-il2cpp"`, `bepinex_build = 788`, the same `chain`/
+`chain_config` shape as below) so a launcher can offer "play with your mods" for an IL2CPP game. A
+real Windows-pack-under-Proton run (Schedule I) proved the handoff end to end, not just that it
+hands off cleanly: the player's own be.788 BepInEx ran their fixture mod with its own cfg, the stale
+Astra copy was skipped, Astra loaded and reached the engine, and `last-run.txt` said `ok`. The BE5/
+Mono flavour's `[integration.mods]` (plain `runner/astra-gi.toml`) is unaffected either way.
 
 **The IL2CPP flavour** (`loader = "bepinex6-il2cpp"`, `Astra.Chain.CoreCLR.dll` +
 `Astra.Chain.Hooks.IL2CPP.dll`) hands off to `BepInEx.Unity.IL2CPP.dll` instead of

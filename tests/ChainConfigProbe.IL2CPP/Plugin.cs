@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: MIT
+using System;
+using System.Diagnostics;
+using System.IO;
+using Astra.Bridge;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Unity.IL2CPP;
@@ -35,6 +39,41 @@ namespace ChainConfigProbe
         public override void Load()
         {
             Log.LogInfo("FoundationStandIn loaded (stands in for the real foundation)");
+            LogIfRunningWithMods();
+        }
+
+        // Mirrors the real foundation's Astra.BepInEx6.IL2CPP Plugin.LogIfRunningWithMods (same
+        // Astra.Bridge.ModsLogLine call), so tools/test-chain-il2cpp.sh can assert the "with your
+        // mods" line's presence/absence on this stand-in — the real plugin cannot run in this
+        // sandboxed test environment at all (this class's own doc comment above explains why). One
+        // deliberate difference from the real plugin: this never touches
+        // `IL2CPPChainloader.Instance` — under `tools/test-chain-il2cpp.sh`'s "merge" scenarios
+        // this stand-in loads through a plain `BaseChainloader&lt;BasePlugin&gt;` test double
+        // (`ChainIl2CppMergeTest`), never a real `IL2CPPChainloader`, and forcing that type's own
+        // static init in that path proved to crash the native IL2CPP interop underneath it. The
+        // plugin count is test-only diagnostic text anyway; no assertion here reads it.
+        void LogIfRunningWithMods()
+        {
+            try
+            {
+                string ownRoot = Environment.GetEnvironmentVariable("ASTRA_CHAIN_OWN_ROOT");
+                string theirRoot = Paths.BepInExRootPath;
+                if (!ModsLogLine.ShouldLog(ownRoot, theirRoot))
+                    return;
+
+                string source = Environment.GetEnvironmentVariable("ASTRA_CHAIN_SOURCE");
+                string profile = Environment.GetEnvironmentVariable("ASTRA_CHAIN_PROFILE");
+                string theirVersion = "unknown";
+                string bepinexDll = Path.Combine(Paths.BepInExAssemblyDirectory, "BepInEx.dll");
+                if (File.Exists(bepinexDll))
+                    theirVersion = FileVersionInfo.GetVersionInfo(bepinexDll).ProductVersion;
+
+                Log.LogInfo(ModsLogLine.Format("0.1.0", source, profile, theirVersion, -1));
+            }
+            catch
+            {
+                // A diagnostic line is never a reason to take the plugin down.
+            }
         }
     }
 }

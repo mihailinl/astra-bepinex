@@ -8,23 +8,18 @@ authors = ["mihailinl"]
 license = "MIT"
 repo = "https://github.com/mihailinl/astra-bepinex"
 
-# GATED OFF for release, review fix #5 (2026-10-30): no [integration.mods] table here yet, so no
-# launcher offers "play with your mods" for an IL2CPP game. The chain loader (Astra.Chain.CoreCLR +
-# Astra.Chain.Hooks.IL2CPP, see the [[files]] "chain/**" rule below — those two DLLs stay packaged,
-# inert extra files with nothing pointing a launcher at them) and its headless tests
-# (tools/test-chain-il2cpp.sh) are done and green, but BepInEx 6's own IL2CPPChainloader has never
-# been run end to end through this chain on a real Windows host — this sandboxed Linux host's
-# testbed crashes in BepInEx 6's own native runtime-invoke detour before Execute()/DiscoverPlugins
-# are ever reached (see that script's own header), so the handoff has only ever been proven to hand
-# off cleanly, never that a real IL2CPPChainloader session plays correctly end to end. Restore the
-# table below (docs/GAME-INTEGRATION-MANIFEST.md §7 has its exact shape) once that run has happened.
-# The BE5/Mono runner's own [integration.mods] (runner/astra-gi.toml) is unaffected.
-#
-# [integration.mods]
-# loader = "bepinex6-il2cpp"
-# bepinex_build = 788
-# chain = "${profile}/chain/Astra.Chain.CoreCLR.dll"
-# chain_config = "${profile}/chain/chain.ini"
+# UNGATED (2026-11-01): a real Windows-pack-under-Proton run (Schedule I) proved the handoff end to
+# end, not just that it hands off cleanly — the player's own be.788 BepInEx ran their fixture mod
+# with its own cfg, the stale Astra copy was skipped, Astra loaded and reached the engine, and
+# last-run.txt said ok. Review fix #5's gate (2026-10-30) is lifted; docs/GAME-INTEGRATION-MANIFEST.md
+# §7 carries the same note. The BE5/Mono runner's own [integration.mods] (runner/astra-gi.toml) is
+# unaffected either way.
+
+[integration.mods]
+loader = "bepinex6-il2cpp"
+bepinex_build = 788
+chain = "${profile}/chain/Astra.Chain.CoreCLR.dll"
+chain_config = "${profile}/chain/chain.ini"
 
 [target]                           # a RUNNER: any Unity IL2CPP game the user picks
 engine = "unity-il2cpp"
