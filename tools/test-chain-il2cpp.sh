@@ -78,6 +78,10 @@ HOOKS_DLL="$REPO/src/Astra.Chain.Hooks.IL2CPP/bin/Release/net6.0/Astra.Chain.Hoo
 MERGETEST_DIR="$REPO/tests/ChainIl2CppMergeTest/bin/Release"
 FIXTURES_DLL="$REPO/tests/ChainFixtures.IL2CPP/bin/Release/net6.0/ChainFixtures.IL2CPP.dll"
 PROBE_DLL="$REPO/tests/ChainConfigProbe.IL2CPP/bin/Release/net6.0/ChainConfigProbe.IL2CPP.dll"
+# FoundationStandIn (inside PROBE_DLL) calls Astra.Bridge.ModsLogLine: its own assembly must be
+# copied alongside PROBE_DLL everywhere PROBE_DLL is, or resolving it at Load() time crashes far
+# harder than a caught exception (observed: native "Aborted", not a catchable .NET exception).
+BRIDGE_CORE_DLL="$REPO/src/Astra.Bridge.Core/bin/Release/netstandard2.0/Astra.Bridge.Core.dll"
 # A fake BepInEx.Core.dll reporting "6.0.0-be.7880+fakehash" (review fix #2's version-prefix-
 # collision case) — see that project's own header for why a real be.788 core cannot be made to
 # say this without hand-patching a native resource.
@@ -115,7 +119,7 @@ make_astra_profile_il2cpp() {
   mkdir -p "$dir/BepInEx/core" "$dir/BepInEx/plugins/Astra" "$dir/chain" "$dir/dotnet"
   cp -r "$LINUXPACK/BepInEx/core/." "$dir/BepInEx/core/"
   cp -r "$LINUXPACK/dotnet/." "$dir/dotnet/"
-  cp "$PROBE_DLL" "$dir/BepInEx/plugins/Astra/"
+  cp "$PROBE_DLL" "$BRIDGE_CORE_DLL" "$dir/BepInEx/plugins/Astra/"
   cp "$CHAIN_DLL" "$HOOKS_DLL" "$dir/chain/"
 }
 
@@ -371,7 +375,7 @@ make_merge_layout() {
   cp -r "$LINUXPACK/BepInEx/core/." "$ours/fakegame/BepInEx/core/"
   cp -n "$LINUXPACK"/dotnet/*.dll "$ours/BepInEx/core/" 2>/dev/null || true
   cp -n "$LINUXPACK"/dotnet/*.dll "$ours/fakegame/BepInEx/core/" 2>/dev/null || true
-  cp "$PROBE_DLL" "$ours/BepInEx/plugins/"
+  cp "$PROBE_DLL" "$BRIDGE_CORE_DLL" "$ours/BepInEx/plugins/"
   cp -r "$MERGETEST_DIR/." "$ours/mergetest/"
   printf '[Logging.Console]\nEnabled = false\n[Logging.Disk]\nEnabled = true\n' > "$ours/fakegame/BepInEx/config/BepInEx.cfg"
 }
