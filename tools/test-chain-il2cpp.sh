@@ -45,7 +45,7 @@ REPO=$(pwd)
 
 TMPDIR=${TMPDIR:-/tmp}
 SCRATCH=${ASTRA_CHAIN_TEST_SCRATCH:-"$TMPDIR/astra-chain-il2cpp-test"}
-PACKS_ROOT=${ASTRA_CHAIN_TEST_PACKS:-/mnt/data/claude-scratch/astra-avatar-engine/gi-bugs/packs/x}
+PACKS_ROOT=${ASTRA_CHAIN_TEST_PACKS:-$HOME/claude-scratch/astra-avatar-engine/gi-bugs/packs/x}
 TESTBED=${ASTRA_CHAIN_TEST_TESTBED:-"$REPO/unity/AstraTestbed/Build/il2cpp"}
 BEPINEX6_LINUX_URL="https://builds.bepinex.dev/projects/bepinex_be/788/BepInEx-Unity.IL2CPP-linux-x64-6.0.0-be.788%2B5b766a3.zip"
 BEPINEX6_LINUX_SHA256=b9428e9f4b03f863114fe049ea8f578a45cd92ac68358136cd35b3fd6b3650c2

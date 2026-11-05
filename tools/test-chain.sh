@@ -22,7 +22,7 @@ REPO=$(pwd)
 
 TMPDIR=${TMPDIR:-/tmp}
 SCRATCH=${ASTRA_CHAIN_TEST_SCRATCH:-"$TMPDIR/astra-chain-test"}
-PACKS_ROOT=${ASTRA_CHAIN_TEST_PACKS:-/mnt/data/claude-scratch/astra-avatar-engine/gi-bugs/packs/x}
+PACKS_ROOT=${ASTRA_CHAIN_TEST_PACKS:-$HOME/claude-scratch/astra-avatar-engine/gi-bugs/packs/x}
 LAUNCHER_REPO=${ASTRA_CHAIN_TEST_LAUNCHER:-"$REPO/../astra-game-launcher"}
 TESTBED=${ASTRA_CHAIN_TEST_TESTBED:-"$REPO/unity/AstraTestbed/Build/mono"}
 
