@@ -27,7 +27,7 @@ namespace Astra.Unity
         /// middle of her <paramref name="height"/>, in the game's units) and how often she was drawn in
         /// the last 10 s, and log the line when its state changed.</summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
-        public void Check(Camera cam, Her her, float height, Compositor compositor, ManualLogSource log)
+        public void Check(Camera cam, Her her, float height, Compositor compositor, ManualLogSource log, bool ageLine)
         {
             next = Time.unscaledTime + 10f;
             if (compositor == null) return;
@@ -36,6 +36,12 @@ namespace Astra.Unity
             drawnThen = compositor.Drawn;
             picturesThen = compositor.Pictures;
             emptyThen = compositor.Empty;
+            // Taken every check, so a window always starts at the last one, the switch on or off.
+            var a = compositor.TakeAge();
+            if (ageLine && a.Draws > 0)
+                log.LogInfo($"picture age: in 10 s {a.Draws} draws from {pictures} new pictures, each " +
+                    $"{(double)a.Frames / a.Draws:0.0} game frames / {a.Seconds / a.Draws * 1000:0.0} ms old on average (at most {a.FramesMax} / {a.SecondsMax * 1000:0} ms); " +
+                    $"since its camera the camera had turned {a.Degrees / a.Draws:0.00}° (at most {a.DegreesMax:0.0}°) and moved {a.Metres / a.Draws * 100:0.0} cm (at most {a.MetresMax * 100:0} cm)");
             string state, where;
             if (!her.Placed)
             {

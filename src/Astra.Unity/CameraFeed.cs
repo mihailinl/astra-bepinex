@@ -48,6 +48,8 @@ namespace Astra.Unity
         public Vector3 Right, Up, Fwd;
         /// <summary>tan of the half field of view, horizontally and vertically.</summary>
         public float TanX, TanY;
+        /// <summary>When it was sent (unscaled time): how old a picture drawn for it is when shown.</summary>
+        public float SentAt;
     }
 
     /// <summary>
@@ -56,7 +58,11 @@ namespace Astra.Unity
     /// </summary>
     sealed class CameraFeed
     {
-        readonly Shot[] history = new Shot[64];
+        /// <summary>Every camera sent in the last second (unscaled time), up to 1024 of them: a picture
+        /// comes back about one engine frame plus a GPU readback later, whatever the game's frame rate.
+        /// Held by AGE: the last 64 cameras were less than 0.2 s at several hundred FPS, and every
+        /// picture then came back for a camera already forgotten (see <see cref="RecentById{T}"/>).</summary>
+        readonly RecentById<Shot> history = new RecentById<Shot>(1024, 1.0);
         long next;
 
         /// <summary>Why the last <see cref="Message"/> refused its camera, as a line for the log; null
@@ -99,10 +105,11 @@ namespace Astra.Unity
                 Fwd = pose.Fwd,
                 TanX = tanX,
                 TanY = tanY,
+                SentAt = Time.unscaledTime,
             };
             double fovY = 2 * Math.Atan(tanY) * (180 / Math.PI);
             string json = Messages.Cam(shot.Id, Wire.Of(shot.Pos), Wire.Of(shot.Fwd), Wire.Of(shot.Up), fovY, w, h, null, view);
-            if (json != null) history[shot.Id % history.Length] = shot;
+            if (json != null) history.Put(shot.Id, Time.unscaledTime, shot);
             return json;
         }
 
@@ -123,10 +130,10 @@ namespace Astra.Unity
                 : $"the camera '{cam.name}' is orthographic: Astra draws for perspective cameras only";
         }
 
-        public bool Find(long id, out Shot shot)
-        {
-            shot = history[((id % history.Length) + history.Length) % history.Length];
-            return shot.Id == id && id != 0;
-        }
+        /// <summary>The id of the newest camera sent (0 before the first).</summary>
+        public long LastId => next;
+
+        /// <summary>The camera sent as <paramref name="id"/>, while it is no older than a second.</summary>
+        public bool Find(long id, out Shot shot) => history.Find(id, Time.unscaledTime, out shot);
     }
 }

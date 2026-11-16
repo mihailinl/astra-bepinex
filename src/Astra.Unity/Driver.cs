@@ -230,8 +230,11 @@ namespace Astra.Unity
             // asks (or whose pipeline asset says so) — without it she is drawn over everything
             // (Compositor.DepthState says so). Held only while she is drawn into the main camera.
             HoldDepth(compositor != null && compositor.Show ? main : null);
+            // Where her picture is looked up from: the middle of her body, along her own up.
+            if (compositor != null)
+                compositor.HerCentre = her.Placed ? her.Position + (her.Up ?? Vector3.up) * (HerHeight * scale * 0.5f) : (Vector3?)null;
             if (main == null) return;
-            if (wasLive && whereLine.Due) sayingWhere.Run(() => whereLine.Check(main, her, HerHeight * scale, compositor, log), warn);
+            if (wasLive && whereLine.Due) sayingWhere.Run(() => whereLine.Check(main, her, HerHeight * scale, compositor, log, settings.PictureAge.Value), warn);
         }
 
         /// <summary>

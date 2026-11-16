@@ -35,6 +35,8 @@ namespace Astra.Unity
         public ConfigEntry<bool> SendLight;
         public ConfigEntry<bool> Shadows;
 
+        public ConfigEntry<bool> PictureAge;
+
         /// <summary>The player's value if they changed it from the foundation's default, else the
         /// integration's default when it set one, else the foundation's. <c>EqualityComparer&lt;T&gt;.Default</c>
         /// (M5), never <c>object.Equals</c>, which boxes both sides — this runs several times a frame.</summary>
@@ -82,6 +84,8 @@ namespace Astra.Unity
                 SendLight = c.Bind("Picture", "SendLight", true, "Light her with this game's sun and sky."),
                 Shadows = c.Bind("Picture", "Shadows", true,
                     "Let this game's own lights cast her shadow (a copy of her body that only casts shadows, never drawn)."),
+                PictureAge = c.Bind("Diagnostics", "PictureAge", false,
+                    "Every 10 s while she is drawn, log how old her picture was when shown (game frames and ms since its camera was sent) and how far the camera had turned and moved since: what she lags or doubles by. For testers."),
             };
         }
     }

@@ -68,10 +68,49 @@ namespace Astra.Unity
         /// <summary>Whether she is shown at all (the toggle, General.Enabled, and a live link).</summary>
         public bool Show { get; set; } = true;
 
+        /// <summary>The middle of her body in the game's world, set every frame while she is placed (null
+        /// while she is not): her picture is looked up through the plane there (<see cref="Reprojection"/>).</summary>
+        public Vector3? HerCentre { get; set; }
+
         /// <summary>How many times she was drawn into a camera, how many new pictures were taken from
         /// Astra, and how many draws were skipped because the picture held nothing of her (a cropped
         /// frame with no rectangle: she is out of view) — running counts, for the "where is she" line.</summary>
         public int Drawn, Pictures, Empty;
+
+        /// <summary>How old the pictures drawn into the main view were when drawn, and how far the camera
+        /// had turned and moved since theirs — what she lags or doubles by. Summed per draw, taken (and
+        /// cleared) by the <c>[Diagnostics] PictureAge</c> line.</summary>
+        public struct AgeTally
+        {
+            public int Draws;
+            public long Frames, FramesMax;
+            public double Seconds, Degrees, Metres;
+            public float SecondsMax, DegreesMax, MetresMax;
+        }
+        AgeTally age;
+
+        /// <summary>The tally since the last call, and start a new one.</summary>
+        public AgeTally TakeAge()
+        {
+            var t = age;
+            age = default;
+            return t;
+        }
+
+        void NoteAge(in Shot then, in CameraPose now)
+        {
+            long frames = shots.LastId - then.Id;
+            float seconds = Time.unscaledTime - then.SentAt, degrees = Vector3.Angle(then.Fwd, now.Fwd), metres = Vector3.Distance(then.Pos, now.Pos);
+            age.Draws++;
+            age.Frames += frames;
+            age.Seconds += seconds;
+            age.Degrees += degrees;
+            age.Metres += metres;
+            if (frames > age.FramesMax) age.FramesMax = frames;
+            if (seconds > age.SecondsMax) age.SecondsMax = seconds;
+            if (degrees > age.DegreesMax) age.DegreesMax = degrees;
+            if (metres > age.MetresMax) age.MetresMax = metres;
+        }
 
         /// <summary>The share of her newest picture that is not fully transparent, sampled every 5 s
         /// (−1 before the first): 0 means Astra drew an EMPTY picture — she is out of the view it was
@@ -725,13 +764,25 @@ namespace Astra.Unity
             // The present view's axes. A mirror's camera renders the proper view flipped left to
             // right: its x axis is the proper camera's left.
             var now = CameraPose.Of(cam);
+            if (viewOf(cam) == 0) NoteAge(then, now);
             Vector3 right = now.Mirrored ? -now.Right : now.Right, up = now.Up, fwd = now.Fwd;
-            // Rows of the rotation from the present view to the one she was drawn in, and her eye then.
+            // Rows of the rotation from the present view to the one she was drawn in, and her eye then —
+            // made the homography of the plane through her (Reprojection.ThroughHer) wherever her centre
+            // is known: a camera that orbits the player moves, and the rotation alone shook her by the
+            // whole turn. A camera turning where it stands keeps the rotation exactly.
             var eye = then.Pos - now.Pos;
-            b.SetVector(IdRot0, new Vector4(Vector3.Dot(then.Right, right), Vector3.Dot(then.Right, up), Vector3.Dot(then.Right, fwd), 0));
-            b.SetVector(IdRot1, new Vector4(Vector3.Dot(then.Up, right), Vector3.Dot(then.Up, up), Vector3.Dot(then.Up, fwd), 0));
-            b.SetVector(IdRot2, new Vector4(Vector3.Dot(then.Fwd, right), Vector3.Dot(then.Fwd, up), Vector3.Dot(then.Fwd, fwd), 0));
-            b.SetVector(IdEyeThen, new Vector4(Vector3.Dot(eye, right), Vector3.Dot(eye, up), Vector3.Dot(eye, fwd), 0));
+            Vec3 Row(Vector3 a) => new Vec3(Vector3.Dot(a, right), Vector3.Dot(a, up), Vector3.Dot(a, fwd));
+            Vec3 r0 = Row(then.Right), r1 = Row(then.Up), r2 = Row(then.Fwd), e = Row(eye);
+            if (HerCentre.HasValue)
+            {
+                var c = HerCentre.Value - then.Pos;
+                Reprojection.ThroughHer(ref r0, ref r1, ref r2, ref e,
+                    new Vec3(Vector3.Dot(c, then.Right), Vector3.Dot(c, then.Up), Vector3.Dot(c, then.Fwd)));
+            }
+            b.SetVector(IdRot0, new Vector4((float)r0.X, (float)r0.Y, (float)r0.Z, 0));
+            b.SetVector(IdRot1, new Vector4((float)r1.X, (float)r1.Y, (float)r1.Z, 0));
+            b.SetVector(IdRot2, new Vector4((float)r2.X, (float)r2.Y, (float)r2.Z, 0));
+            b.SetVector(IdEyeThen, new Vector4((float)e.X, (float)e.Y, (float)e.Z, 0));
             // The camera's OWN projection, not its field of view: a mirror's camera is given an
             // explicit (oblique, other-aspect) matrix. Its x/y rows give the rays; the GPU form of
             // the whole matrix turns the game's depth into metres and her metres into depth.
