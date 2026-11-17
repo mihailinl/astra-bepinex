@@ -61,6 +61,21 @@ namespace Astra.Bridge
             return false;
         }
 
+        /// <summary>The value put as <paramref name="id"/>, while it is still held, however old: for the
+        /// newest few entries, which a caller keeps finding when time ran on without new ones (a game
+        /// that froze for longer than <see cref="MaxAge"/> while it loads a world).</summary>
+        public bool FindHeld(long id, out T value)
+        {
+            var e = ring[Slot(id)];
+            if (id != 0 && e.Id == id)
+            {
+                value = e.Value;
+                return true;
+            }
+            value = default;
+            return false;
+        }
+
         int Slot(long id) => (int)(((id % ring.Length) + ring.Length) % ring.Length);
     }
 }

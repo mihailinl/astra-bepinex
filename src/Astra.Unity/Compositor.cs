@@ -52,6 +52,7 @@ namespace Astra.Unity
         CameraFeed shots;
         Settings settings;
         Func<Camera, int> viewOf = _ => 0;
+        Func<Camera, bool> isMain = _ => true;
 
         /// <summary>One view's picture: two textures, the frame they hold, the newest frame seen.</summary>
         sealed class View
@@ -232,13 +233,15 @@ namespace Astra.Unity
             this.bundle = bundle;
         }
 
-        /// <summary>What every draw reads: the cameras sent (to reproject from), the settings, and which
-        /// view a camera is.</summary>
-        internal void Bind(CameraFeed shots, Settings settings, Func<Camera, int> viewOf)
+        /// <summary>What every draw reads: the cameras sent (to reproject from), the settings, which
+        /// view a camera is, and whether it is the game's main camera (the only one the picture-age line
+        /// counts: a mirror drawn from the main view's picture is not the lag anyone sees).</summary>
+        internal void Bind(CameraFeed shots, Settings settings, Func<Camera, int> viewOf, Func<Camera, bool> isMain)
         {
             this.shots = shots;
             this.settings = settings;
             this.viewOf = viewOf;
+            this.isMain = isMain;
         }
 
         /// <summary>Load the shader bundle built for this game's Unity line and platform.</summary>
@@ -743,6 +746,10 @@ namespace Astra.Unity
         /// no Execute) is noticed and she is composited the old way instead of not at all.</summary>
         public int PassFrame = -1, PassCamera;
 
+        /// <summary>A Unity vector as it is, for <see cref="Reprojection"/> (not the wire's axes: only
+        /// dot products are taken there).</summary>
+        static Vec3 V(Vector3 a) => new Vec3(a.x, a.y, a.z);
+
         /// <summary>Put everything the pass reads for <paramref name="cam"/> in <paramref name="b"/>;
         /// false when there is nothing to show.</summary>
         bool Prepare(Camera cam, bool srp, bool intoTexture, bool depthTest, MaterialPropertyBlock b)
@@ -764,21 +771,22 @@ namespace Astra.Unity
             // The present view's axes. A mirror's camera renders the proper view flipped left to
             // right: its x axis is the proper camera's left.
             var now = CameraPose.Of(cam);
-            if (viewOf(cam) == 0) NoteAge(then, now);
             Vector3 right = now.Mirrored ? -now.Right : now.Right, up = now.Up, fwd = now.Fwd;
             // Rows of the rotation from the present view to the one she was drawn in, and her eye then —
-            // made the homography of the plane through her (Reprojection.ThroughHer) wherever her centre
-            // is known: a camera that orbits the player moves, and the rotation alone shook her by the
-            // whole turn. A camera turning where it stands keeps the rotation exactly.
-            var eye = then.Pos - now.Pos;
-            Vec3 Row(Vector3 a) => new Vec3(Vector3.Dot(a, right), Vector3.Dot(a, up), Vector3.Dot(a, fwd));
-            Vec3 r0 = Row(then.Right), r1 = Row(then.Up), r2 = Row(then.Fwd), e = Row(eye);
-            if (HerCentre.HasValue)
-            {
-                var c = HerCentre.Value - then.Pos;
-                Reprojection.ThroughHer(ref r0, ref r1, ref r2, ref e,
-                    new Vec3(Vector3.Dot(c, then.Right), Vector3.Dot(c, then.Up), Vector3.Dot(c, then.Fwd)));
-            }
+            // made the homography of the plane through her wherever her centre is known, with the
+            // cameras taken relative to HER (Reprojection.Rows): a camera that orbits the player moves,
+            // and the rotation alone shook her by the whole turn; she runs with the camera, and taking
+            // the world as standing still shook her by the run. A camera turning where it stands keeps
+            // the rotation exactly. Where the plane through her is no plane (her centre at the present
+            // eye or behind the camera), this frame is not drawn: anything else throws her across.
+            if (!Reprojection.Rows(
+                    new Reprojection.View(V(then.Pos), V(then.Right), V(then.Up), V(then.Fwd)),
+                    then.HasHer ? V(then.Her) : (Vec3?)null,
+                    new Reprojection.View(V(now.Pos), V(right), V(up), V(fwd)),
+                    HerCentre.HasValue ? V(HerCentre.Value) : (Vec3?)null,
+                    out var r0, out var r1, out var r2, out var e))
+                return false;
+            if (isMain(cam)) NoteAge(then, now);
             b.SetVector(IdRot0, new Vector4((float)r0.X, (float)r0.Y, (float)r0.Z, 0));
             b.SetVector(IdRot1, new Vector4((float)r1.X, (float)r1.Y, (float)r1.Z, 0));
             b.SetVector(IdRot2, new Vector4((float)r2.X, (float)r2.Y, (float)r2.Z, 0));

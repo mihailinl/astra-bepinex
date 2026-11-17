@@ -72,7 +72,7 @@ namespace Astra.Unity
         /// to a menu's camera and back would otherwise bounce her between the desktop and the game.</summary>
         void SendCamera(Camera cam, int view = 0)
         {
-            string json = shots.Message(cam, settings.MaxPictureHeight.Value, view);
+            string json = shots.Message(cam, settings.MaxPictureHeight.Value, view, compositor?.HerCentre);
             if (json == null && shots.Refusal != null)
             {
                 // Looked up by the text itself (the feed builds it once per camera and reason): no key is
