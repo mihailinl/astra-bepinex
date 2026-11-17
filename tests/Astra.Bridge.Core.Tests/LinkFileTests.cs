@@ -42,6 +42,35 @@ public class LinkFileTests
     }
 
     [Fact]
+    public void A_file_held_open_for_writing_is_read_and_reading_it_never_holds_it_in_place()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "astra-linkfile-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            string path = Path.Combine(dir, LinkFile.FileName);
+            File.WriteAllText(path, File_(expires: now + 600_000));
+            // Someone holds it open for writing (the launcher mid-write): it is still read.
+            using (new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+                Assert.NotNull(LinkFile.Read(path, Id, now, out _));
+            // Opened the way LinkFile.Read opens it, the file can still be rewritten and removed (a new
+            // Play replacing it), which a reader sharing only Read would refuse on Windows.
+            using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            {
+                using (var w = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+                    w.SetLength(0);
+                File.Delete(path);
+            }
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public void Another_schema_another_integration_or_an_expired_file_is_refused()
     {
         Assert.Null(LinkFile.Parse(File_(schema: 2), "p", Id, Now, out var why));

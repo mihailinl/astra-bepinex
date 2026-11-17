@@ -624,8 +624,11 @@ namespace Astra.Bridge
                     string tool = m.TryGetValue("tool", out var tl) ? tl as string : null;
                     if (string.IsNullOrEmpty(id) || id.Length > 128 || string.IsNullOrEmpty(tool)) return;
                     var args = m.TryGetValue("args", out var a) ? a as Dictionary<string, object> : null;
+                    // Its arrival is stamped before it counts as waiting: whoever sees PendingCalls grow
+                    // (a test moving the clock) never sees a call whose time is not yet taken.
+                    double at = clock();
                     Interlocked.Increment(ref pendingCalls);
-                    inbox.Enqueue(new Inbound { Kind = InKind.Call, Session = Session, Id = id, Tool = LocalToolName(tool), Args = new LinkArgs(args), At = clock() });
+                    inbox.Enqueue(new Inbound { Kind = InKind.Call, Session = Session, Id = id, Tool = LocalToolName(tool), Args = new LinkArgs(args), At = at });
                     return;
                 }
                 case "end":

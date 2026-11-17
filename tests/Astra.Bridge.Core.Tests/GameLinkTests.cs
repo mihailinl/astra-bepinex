@@ -44,10 +44,10 @@ public class GameLinkTests : IDisposable
         return l;
     }
 
-    LinkClient Client()
+    LinkClient Client(bool write = true)
     {
         long ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        File.WriteAllText(Path.Combine(dir, LinkFile.FileName),
+        if (write) File.WriteAllText(Path.Combine(dir, LinkFile.FileName),
             "{\"schema\":1,\"url\":\"ws://127.0.0.1:" + mock.Port + "/link\",\"token\":\"" + Token + "\",\"integration\":\"" + Id + "\"," +
             "\"game\":\"892970\",\"issued_unix_ms\":" + ms + ",\"expires_unix_ms\":" + (ms + 600_000) + "}");
         var c = LinkClient.TryCreate(dir, Id, "tests/1.0", out var why, Fast, () => now, env: _ => null);
@@ -316,7 +316,7 @@ public class GameLinkTests : IDisposable
         var l = Link();
         var first = Client();
         l.Attach(first);
-        var second = Client();
+        var second = Client(write: false); // the same file: the first client may be reading it
         l.Attach(second);
         Assert.True(first.Over);
         Assert.False(second.Over);
