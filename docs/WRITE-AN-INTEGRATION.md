@@ -303,7 +303,8 @@ mirrors.
 
 `Link` is the game's side of Astra Link (AstraPlugins `spec/games/link-v1.md`): tools Astra's AI may
 call in your game, the events and the context it is told, your triggers, and a voice key on her. It
-is its own socket to the daemon, never the bridge that draws her.
+is its own socket to the daemon, never the bridge that draws her. It arrives in the foundation
+0.9.0: build against `<AstraVersion>0.9.0</AstraVersion>` or later.
 
 ```csharp
 astra.Link.Tool("come_here", args => AstraSdk.Drawn
