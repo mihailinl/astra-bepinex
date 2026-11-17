@@ -310,7 +310,7 @@ astra.Link.Tool("come_here", args => AstraSdk.Drawn
     ? LinkResult.Done(new LinkData().Set("arrived", Viking.WalkToPlayer()))
     : LinkResult.Refuse(LinkRefusal.NotHolding));
 astra.Link.Tool("time_until_night", _ => LinkResult.Done(new LinkData().Set("minutes", Sky.MinutesToNight)));
-astra.OnFrame(f =>
+astra.Link.OnFrame(() =>
 {
     if (Viking.JustFell) astra.Link.Event("player_fell", new LinkData().Set("height_m", Viking.FallHeight));
     astra.Link.Quiet(Viking.InMenu || Viking.InCutscene);
@@ -324,29 +324,39 @@ astra.OnFrame(f =>
   your game ("AI may act", "Tell Astra what happens", "She may speak on her own"), all off by
   default. Without a link file every call does nothing: `Tool` keeps the handler, `Event`, `Trigger`
   and `Talk` answer false. So you write the same code either way, and test the rest without Astra.
-- **Tools** run on the main thread, in the frame, and answer within 10 s or the call is refused
-  `busy`. Answer with what the tool's declared result schema names: enums, numbers and booleans
-  only, never a string a player wrote. Refuse with a `LinkRefusal` code: `not_holding` for a tool
-  that moves or turns her while `AstraSdk.Drawn` is false, `not_in_world` in a menu or a loading
-  screen, `player_dead`, `unknown_target`, `bad_args`. A handler that throws answers `failed`, and
-  your integration stays on. A tool that only reads the game does not need her drawn.
+- **Send from `Link.OnFrame`, not from `OnFrame`.** Your `OnFrame` handlers run only while she is
+  drawn; `Link.OnFrame` runs every frame while Link has a connection, in a menu, with her hidden,
+  with no camera. That is where a menu's `Quiet(true)` or a `session_ended` can be said at all.
+- **Tools** run on the main thread, in the frame. Answer at once: Astra waits 10 seconds for a call,
+  and a call that waited 9 for the frame is refused `busy` without running. Answer with what the
+  tool's declared result schema names: enums, numbers and booleans only, never a string a player
+  wrote. Refuse with a `LinkRefusal` code: `not_holding` for a tool that moves or turns her while
+  `AstraSdk.Drawn` is false, `not_in_world` in a menu or a loading screen, `busy` in a cutscene or
+  a teleport, `player_dead`, `unknown_target`, `bad_args`. A tool that only reads the game does not
+  need her drawn.
 - **Events** are the seven v1 words (`session_started`, `session_ended`, `player_hurt`,
   `player_fell`, `player_died`, `player_revived`, `goal_reached`) that your manifest declares. Send
   one at the change, once, never every frame while a state holds: a state is the context, or a
   raw fact for her animations (§6).
 - **The context** is what the game is like now, under your declared `context` schema. Set it when it
-  changes or about once a second; it is kept and said when a session starts.
+  changes or about once a second; it is kept and said when a session starts. One over 2 KiB is not
+  taken (`Context` answers false), and the last one that fitted stands.
 - **Quiet** says the game is in a menu, a cutscene or paused, and Astra does not speak on her own
   meanwhile. Set it every frame if that is easier: only a change is sent.
 - **`GrantsChanged`** fires when a session starts and whenever the user flips a switch: stop at once
   what is no longer granted. **`Ended`** fires when Astra ends Link for good.
 - Hiding her (the toggle key, `General.Enabled`) does not close Link. Astra's switches decide it.
+- What you hand `Link` never switches your integration off: a tool that throws answers `failed`, a
+  `Link.OnFrame` handler that throws is switched off, and each is said once in the log with its
+  stack.
 
 ### When your code throws
 
 If one of your callbacks throws, or returns a player or a position that is not a finite number, the
 foundation logs `the integration '<id>' failed (…) and is switched off; Astra goes on with her
 defaults` and uses its defaults until a new `Register`. She keeps working; your integration does not.
+Its Astra Link closes with it, for the rest of that Play: the link file's token was spent, so a new
+`Register` gets no new session. Registering again while nothing has failed keeps the session.
 `GameType` never throws, so most of your code cannot.
 
 ### A whole example

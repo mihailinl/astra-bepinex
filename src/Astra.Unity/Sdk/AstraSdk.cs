@@ -127,7 +127,8 @@ namespace Astra.Sdk
         /// triggers and the voice key (<see cref="GameLink"/>). It is live only when Astra started the game
         /// with a link file for this integration (an integration from the signed catalogue, declaring
         /// <c>[integration.link]</c> in its manifest), and only for what the user switched on; otherwise
-        /// every call does nothing. It does not follow her picture: hiding her does not close it.
+        /// every call does nothing. It does not follow her picture: hiding her does not close it, and its own
+        /// <see cref="GameLink.OnFrame"/> runs while <see cref="OnFrame"/> does not (she is not drawn).
         /// </summary>
         public GameLink Link { get; } = new GameLink();
 
@@ -200,7 +201,8 @@ namespace Astra.Sdk
         }
 
         /// <summary>Called every frame before the brain: set raw facts in <see cref="FrameContext.Params"/>,
-        /// send cues. Several handlers run in the order they were added.</summary>
+        /// send cues. Several handlers run in the order they were added. Only while she is drawn (the
+        /// engine connected, a camera, not hidden): what Astra Link says goes in <see cref="GameLink.OnFrame"/>.</summary>
         public GameIntegration OnFrame(Action<FrameContext> handler)
         {
             FrameHandlers.Add(handler);

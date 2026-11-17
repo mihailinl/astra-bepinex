@@ -211,6 +211,13 @@ namespace Astra.Bridge
             lock (tools) tools[name] = handler ?? throw new ArgumentNullException(nameof(handler));
         }
 
+        /// <summary>Forget every tool handler (a call then answers <c>unknown_tool</c>): before the session
+        /// is handed to the same integration registered anew, so no handler of the old one runs.</summary>
+        internal void ClearTools()
+        {
+            lock (tools) tools.Clear();
+        }
+
         public void Start()
         {
             if (thread != null || Stopped) return;

@@ -223,6 +223,94 @@ public class GameLinkTests : IDisposable
     }
 
     [Fact]
+    public void Link_frame_handlers_run_only_while_connected_and_one_that_throws_is_switched_off()
+    {
+        var l = Link();
+        int frames = 0, bad = 0;
+        l.OnFrame(() => frames++);
+        l.OnFrame(() => { bad++; throw new InvalidOperationException("frame boom"); });
+        l.Pump(); // no connection: no frame
+        Assert.Equal(0, frames);
+        l.Attach(Client());
+        l.Pump();
+        l.Pump();
+        Assert.Equal(2, frames);
+        Assert.Equal(1, bad);
+        Assert.Single(warnings, w => w.Contains("frame boom") && w.Contains("switched off"));
+        l.Detach();
+        l.Pump();
+        Assert.Equal(2, frames);
+    }
+
+    [Fact]
+    public async Task A_tool_or_a_subscriber_that_throws_is_said_with_its_stack_and_the_rest_goes_on()
+    {
+        var l = Link();
+        int second = 0;
+        l.Tool("drop_item", _ => throw new InvalidOperationException("tool boom"));
+        l.GrantsChanged += _ => throw new InvalidOperationException("grants boom");
+        l.GrantsChanged += _ => second++;
+        l.Attach(Client());
+        var peer = await Session(l, LinkClientTests.Welcome("r1", tools: "[\"game_0123abcd_drop_item\"]"));
+        PumpUntil(l, () => second >= 1, "the second subscriber");
+        Assert.Contains(warnings, w => w.Contains("grants boom"));
+        await peer.Send("{\"t\":\"call\",\"id\":\"c1\",\"tool\":\"game_0123abcd_drop_item\",\"args\":{}}");
+        var reading = peer.Next();
+        PumpUntil(l, () => reading.IsCompleted, "the result");
+        var r = await reading;
+        Assert.Equal(("c1", false, "failed"), ((string)r["id"], (bool)r["ok"], (string)r["error"]));
+        Assert.Contains(warnings, w => w.Contains("drop_item") && w.Contains("tool boom") && w.Contains(" at "));
+        l.Detach();
+    }
+
+    [Fact]
+    public async Task The_same_integration_registered_again_takes_the_session_over()
+    {
+        var first = Link();
+        int oldRan = 0, newRan = 0;
+        first.Tool("come_here", _ => { oldRan++; return LinkResult.Done(); });
+        first.Tool("stay", _ => { oldRan++; return LinkResult.Done(); });
+        var c = Client();
+        first.Attach(c);
+        var peer = await Session(first, LinkClientTests.Welcome("r1",
+            tools: "[\"game_0123abcd_come_here\",\"game_0123abcd_stay\"]", events: "[\"player_fell\"]"));
+
+        var second = Link();
+        var grants = new List<LinkGrants>();
+        second.GrantsChanged += g => grants.Add(g);
+        second.Tool("come_here", _ => { newRan++; return LinkResult.Done(new LinkData().Set("arrived", true)); });
+        first.HandOver(second);
+        Assert.False(first.Live);
+        Assert.False(first.Event("player_fell"));
+        Assert.True(second.Live);
+        Assert.False(c.Over);
+        Assert.NotEmpty(grants); // told at once: the session was live
+        Assert.True(grants[0].HasEvent("player_fell"));
+
+        await peer.Send("{\"t\":\"call\",\"id\":\"c1\",\"tool\":\"game_0123abcd_come_here\",\"args\":{}}");
+        await peer.Send("{\"t\":\"call\",\"id\":\"c2\",\"tool\":\"game_0123abcd_stay\",\"args\":{}}");
+        var results = new Dictionary<string, Dictionary<string, object>>();
+        var reading = Task.Run(async () =>
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                var r = await peer.Next();
+                results[(string)r["id"]] = r;
+            }
+        });
+        PumpUntil(second, () => reading.IsCompleted, "two results");
+        await reading;
+        Assert.True((bool)results["c1"]["ok"]);
+        Assert.Equal("unknown_tool", results["c2"]["error"]); // the old integration's tool is gone with it
+        Assert.Equal((0, 1), (oldRan, newRan));
+        Assert.True(second.Event("player_fell"));
+        Assert.Equal("player_fell", (await peer.Next())["name"]);
+        Assert.Null(await mock.Accept(300)); // the same connection: nothing new
+        second.Detach();
+        Assert.True(c.Over);
+    }
+
+    [Fact]
     public void A_second_attach_closes_the_first_connection()
     {
         var l = Link();

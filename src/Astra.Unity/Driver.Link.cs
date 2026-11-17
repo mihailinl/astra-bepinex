@@ -14,7 +14,7 @@ namespace Astra.Unity
         /// <summary>Astra Link is optional: its first failure closes it and the rest goes on.</summary>
         readonly Feature linking = new Feature("Astra Link");
 
-        Action stepLink;
+        Action stepLink, closeLink;
 
         /// <summary>
         /// Astra Link, the AI's channel (AstraPlugins <c>spec/games/link-v1.md</c>): the integration in
@@ -24,17 +24,34 @@ namespace Astra.Unity
         /// session holds nothing of hers. A tool that moves her refuses <c>not_holding</c> while she is not
         /// drawn (<see cref="AstraSdk.Drawn"/>); one that reads the game answers while she is hidden, and
         /// after the drawing chain stopped. Called first in every LateUpdate, before the frame's own fence.
+        /// <para>A connection lives as long as its integration. The same integration registered again (a
+        /// new object, the same id) takes the session over (<see cref="GameLink.HandOver"/>): the link file's
+        /// token is spent at the first hello. An integration DROPPED for a fault loses its connection, and
+        /// with that Link for the rest of this Play: better no tools for Astra's AI than tools nobody runs.</para>
         /// </summary>
-        void StepLink() => linking.Run(stepLink ??= StepLinkNow, warn, CloseLink);
+        void StepLink() => linking.Run(stepLink ??= StepLinkNow, warn, closeLink ??= CloseLink);
 
         void StepLinkNow()
         {
-            if (!ReferenceEquals(linked, integration))
+            // Read here and not from the frame, which stops with the drawing chain (a fault in Start, a
+            // Fault later): the integration registered most recently, unless it is the one that faulted.
+            var current = AstraSdk.Current;
+            if (ReferenceEquals(current, dropped)) current = null;
+            if (!ReferenceEquals(linked, current))
             {
-                // A new integration in charge, or none (it faulted): the old one's connection is its own.
-                CloseLink();
-                linked = integration;
-                if (linked != null) OpenLink(linked);
+                if (linked != null && current != null && linked.Link.Attached && linked.Id == current.Id)
+                {
+                    linked.Link.HandOver(current.Link);
+                    linked = current;
+                    log.LogInfo($"Astra Link: '{current.Id}' registered again and goes on in the same session ({current.Link.ToolCount} tool(s))");
+                }
+                else
+                {
+                    // Another integration, or none (it faulted): the old one's connection was its own.
+                    CloseLink();
+                    linked = current;
+                    if (linked != null) OpenLink(linked);
+                }
             }
             linked?.Link.Pump();
         }
