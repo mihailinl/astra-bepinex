@@ -46,7 +46,7 @@ for more Unity lines, robustness for IL2CPP builds, and new integrations.
 
 | path | what it is |
 |---|---|
-| `src/Astra.Bridge.Core` | The game-bridge protocol, the WebSocket client and the shared-memory frame ring. .NET Standard 2.0, no Unity. Unit-tested. |
+| `src/Astra.Bridge.Core` | The game-bridge protocol, the WebSocket client, the shared-memory frame ring, and the Astra Link client (`LinkClient`, `LinkFile`: AstraPlugins `spec/games/link-v1.md`). .NET Standard 2.0, no Unity. Unit-tested. |
 | `src/Astra.Unity` | The foundation's Unity code, compiled into BOTH plugins (`Astra.Unity.props`). `Sdk/` is the public API (`Astra.Sdk` namespace). |
 | `src/Astra.BepInEx5` | The Mono plugin (BepInEx 5, `netstandard2.0`). Output: `Astra.Unity.dll`. |
 | `src/Astra.BepInEx6.IL2CPP` | The IL2CPP plugin (BepInEx 6, `net6.0`, the `IL2CPP` symbol). Output: `Astra.Unity.dll`. |
