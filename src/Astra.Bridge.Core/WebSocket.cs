@@ -40,11 +40,26 @@ namespace Astra.Bridge
         {
             this.tcp = tcp;
             stream = tcp.GetStream();
+            lastFrameTick = Environment.TickCount;
         }
+
+        volatile int lastFrameTick;
+
+        /// <summary><see cref="Environment.TickCount"/> when the last frame of any kind arrived (a pong
+        /// too), or when the connection opened: how long the other side has been silent.</summary>
+        public int LastFrameTick => lastFrameTick;
 
         /// <summary>Connect and complete the handshake.</summary>
         /// <exception cref="IOException">Refused, timed out, or not a WebSocket server.</exception>
-        public static WebSocketClient Connect(string host, int port, string path, int timeoutMs)
+        public static WebSocketClient Connect(string host, int port, string path, int timeoutMs) =>
+            Connect(host, port, path, timeoutMs, null);
+
+        /// <summary>Connect and complete the handshake, asking for <paramref name="subprotocol"/>
+        /// (<c>Sec-WebSocket-Protocol</c>) when it is not null: a server that does not answer with
+        /// exactly that subprotocol is refused.</summary>
+        /// <exception cref="IOException">Refused, timed out, not a WebSocket server, or not one that
+        /// speaks <paramref name="subprotocol"/>.</exception>
+        public static WebSocketClient Connect(string host, int port, string path, int timeoutMs, string subprotocol)
         {
             var tcp = new TcpClient { NoDelay = true };
             try
@@ -56,7 +71,7 @@ namespace Astra.Bridge
                 tcp.ReceiveTimeout = timeoutMs;
                 tcp.SendTimeout = timeoutMs;
                 var ws = new WebSocketClient(tcp);
-                ws.Handshake(host, port, path);
+                ws.Handshake(host, port, path, subprotocol);
                 tcp.ReceiveTimeout = 0; // the receive thread blocks until a message or the close
                 // Sends happen on the GAME's thread, once a frame: an engine that stops reading must
                 // cost a frame, not seconds. A send that times out ends the connection (BridgeLink).
@@ -75,7 +90,7 @@ namespace Astra.Bridge
             }
         }
 
-        void Handshake(string host, int port, string path)
+        void Handshake(string host, int port, string path, string subprotocol)
         {
             var nonce = new byte[16];
             using (var rng = RandomNumberGenerator.Create()) rng.GetBytes(nonce);
@@ -86,6 +101,7 @@ namespace Astra.Bridge
                 "Upgrade: websocket\r\n" +
                 "Connection: Upgrade\r\n" +
                 $"Sec-WebSocket-Key: {key}\r\n" +
+                (subprotocol != null ? $"Sec-WebSocket-Protocol: {subprotocol}\r\n" : "") +
                 "Sec-WebSocket-Version: 13\r\n\r\n";
             var bytes = Encoding.ASCII.GetBytes(request);
             stream.Write(bytes, 0, bytes.Length);
@@ -110,14 +126,20 @@ namespace Astra.Bridge
             using (var sha = SHA1.Create())
                 expect = Convert.ToBase64String(sha.ComputeHash(Encoding.ASCII.GetBytes(key + AcceptGuid)));
             bool accepted = false;
+            string protocol = null;
             foreach (var line in lines)
             {
                 int colon = line.IndexOf(':');
                 if (colon < 0) continue;
-                if (!line.Substring(0, colon).Trim().Equals("Sec-WebSocket-Accept", StringComparison.OrdinalIgnoreCase)) continue;
-                accepted = line.Substring(colon + 1).Trim() == expect;
+                string name = line.Substring(0, colon).Trim();
+                if (name.Equals("Sec-WebSocket-Accept", StringComparison.OrdinalIgnoreCase))
+                    accepted = line.Substring(colon + 1).Trim() == expect;
+                else if (name.Equals("Sec-WebSocket-Protocol", StringComparison.OrdinalIgnoreCase))
+                    protocol = line.Substring(colon + 1).Trim();
             }
             if (!accepted) throw new IOException("bad Sec-WebSocket-Accept");
+            if (subprotocol != null && protocol != subprotocol)
+                throw new IOException($"the server does not speak '{subprotocol}'" + (protocol != null ? $" (it answered '{protocol}')" : ""));
             pending = new byte[have - end];
             Buffer.BlockCopy(buf, end, pending, 0, pending.Length);
             pendingAt = 0;
@@ -137,6 +159,10 @@ namespace Astra.Bridge
                 return Send(0x1, encodeBuf, len);
             }
         }
+
+        /// <summary>Send a ping (the other side answers with a pong, which <see cref="LastFrameTick"/>
+        /// notes). False when the connection is gone.</summary>
+        public bool SendPing() => Send(0x9, null, 0);
 
         bool Send(byte opcode, byte[] payload, int len)
         {
@@ -194,6 +220,7 @@ namespace Astra.Bridge
                 while (true)
                 {
                     if (!ReadExact(head, 0, 2)) return null;
+                    lastFrameTick = Environment.TickCount;
                     bool fin = (head[0] & 0x80) != 0;
                     byte op = (byte)(head[0] & 0x0F);
                     bool masked = (head[1] & 0x80) != 0;

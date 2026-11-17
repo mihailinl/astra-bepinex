@@ -253,6 +253,28 @@ namespace Astra.Bridge
             return result;
         }
 
+        /// <summary>How deep <see cref="ReadValue"/> follows objects and arrays inside each other.</summary>
+        public const int MaxDepth = 32;
+
+        /// <summary>
+        /// Reads one JSON value WHOLE, nested parts included — what Astra Link's messages need
+        /// (<c>welcome.granted</c>, <c>call.args</c>). An object comes back as a
+        /// <see cref="Dictionary{TKey,TValue}"/> of <see cref="string"/> to <see cref="object"/> (a
+        /// repeated key: the last wins), an array as a <see cref="List{T}"/> of <see cref="object"/>,
+        /// the rest as <see cref="ReadObject"/> gives them.
+        /// </summary>
+        /// <exception cref="FormatException">The text is not one JSON value, or nests deeper than
+        /// <see cref="MaxDepth"/>.</exception>
+        public static object ReadValue(string json)
+        {
+            var p = new Parser(json);
+            p.Ws();
+            object v = p.Value(0);
+            p.Ws();
+            if (p.Pos != json.Length) throw new FormatException("trailing characters after the value");
+            return v;
+        }
+
         sealed class Parser
         {
             readonly string s;
@@ -287,7 +309,18 @@ namespace Astra.Bridge
                 int start = Pos;
                 while (Pos < s.Length && "+-0123456789.eE".IndexOf(s[Pos]) >= 0) Pos++;
                 if (Pos == start) throw new FormatException($"unexpected '{c}' at {Pos}");
-                return double.Parse(s.Substring(start, Pos - start), NumberStyles.Float, CultureInfo.InvariantCulture);
+                double d;
+                try
+                {
+                    d = double.Parse(s.Substring(start, Pos - start), NumberStyles.Float, CultureInfo.InvariantCulture);
+                }
+                catch (OverflowException)
+                {
+                    // Mono and .NET Framework throw on 1e400 where CoreCLR gives infinity: one answer here.
+                    throw new FormatException($"a number out of range at {start}");
+                }
+                if (double.IsInfinity(d)) throw new FormatException($"a number out of range at {start}");
+                return d;
             }
 
             public string String()
@@ -347,12 +380,54 @@ namespace Astra.Bridge
                 return ok ? list : null;
             }
 
-            /// <summary>Skip one value of any kind (objects and arrays nest).</summary>
-            public void Skip()
+            /// <summary>One value of any kind, read whole (<see cref="ReadValue"/>).</summary>
+            public object Value(int depth)
+            {
+                char c = Peek();
+                if (c != '{' && c != '[') return Scalar();
+                if (depth >= MaxDepth) throw new FormatException($"nested deeper than {MaxDepth} at {Pos}");
+                Pos++;
+                Ws();
+                if (c == '{')
+                {
+                    var obj = new Dictionary<string, object>();
+                    if (Peek() == '}') { Pos++; return obj; }
+                    while (true)
+                    {
+                        Ws();
+                        string key = String();
+                        Ws();
+                        Expect(':');
+                        Ws();
+                        obj[key] = Value(depth + 1);
+                        Ws();
+                        if (Peek() == ',') { Pos++; continue; }
+                        Expect('}');
+                        return obj;
+                    }
+                }
+                var list = new List<object>();
+                if (Peek() == ']') { Pos++; return list; }
+                while (true)
+                {
+                    Ws();
+                    list.Add(Value(depth + 1));
+                    Ws();
+                    if (Peek() == ',') { Pos++; continue; }
+                    Expect(']');
+                    return list;
+                }
+            }
+
+            /// <summary>Skip one value of any kind (objects and arrays nest, at most twice
+            /// <see cref="MaxDepth"/> deep: no reply nests near that, and a hostile one must not run
+            /// the stack out).</summary>
+            public void Skip(int depth = 0)
             {
                 char c = Peek();
                 if (c == '{' || c == '[')
                 {
+                    if (depth >= 2 * MaxDepth) throw new FormatException($"nested deeper than {2 * MaxDepth} at {Pos}");
                     char close = c == '{' ? '}' : ']';
                     Pos++;
                     Ws();
@@ -367,7 +442,7 @@ namespace Astra.Bridge
                             Expect(':');
                             Ws();
                         }
-                        Skip();
+                        Skip(depth + 1);
                         Ws();
                         if (Peek() == ',') { Pos++; continue; }
                         Expect(close);
