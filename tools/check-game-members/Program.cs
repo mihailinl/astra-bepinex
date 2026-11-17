@@ -41,7 +41,7 @@ static class Program
         if (args.Length < 1)
         {
             Console.Error.WriteLine("usage: check-game-members check <ManagedDir> <members.tsv>");
-            Console.Error.WriteLine("       check-game-members dump <ManagedDir> <TypeName>");
+            Console.Error.WriteLine("       check-game-members dump <ManagedDir> <TypeName> [<assembly to look in first>]");
             Console.Error.WriteLine("       check-game-members il2cpp <plugin.dll> <BepInEx/interop dir>");
             return 2;
         }
@@ -50,8 +50,8 @@ static class Program
         {
             case "check" when args.Length == 3:
                 return RunCheck(args[1], args[2]) ? 0 : 1;
-            case "dump" when args.Length == 3:
-                RunDump(args[1], args[2]);
+            case "dump" when args.Length == 3 || args.Length == 4:
+                RunDump(args[1], args[2], args.Length == 4 ? args[3] : DefaultAssembly);
                 return 0;
             case "il2cpp" when args.Length == 3:
                 return Il2CppRefs.Run(args[1], args[2]);
@@ -84,24 +84,40 @@ static class Program
         return mlc;
     }
 
-    static Type? FindType(MetadataLoadContext mlc, string name, string preferAssembly = "Assembly-CSharp")
-    {
-        Assembly? preferred = null;
-        foreach (var a in mlc.GetAssemblies())
-            if (a.GetName().Name == preferAssembly) { preferred = a; break; }
+    /// <summary>Where a Unity game's own code usually is; a game that names it otherwise (Valheim:
+    /// assembly_valheim) says so with <c># prefer-assembly:</c> in its members file.</summary>
+    const string DefaultAssembly = "Assembly-CSharp";
 
+    /// <summary>
+    /// The type named <paramref name="name"/>: in <paramref name="preferAssembly"/> first, then in the
+    /// other assemblies IN NAME ORDER. <c>GetAssemblies()</c> has no stable order, so without one a name
+    /// two assemblies share (Valheim's <c>Character</c>) found one type in one run and the other in the
+    /// next. <paramref name="ambiguous"/> names the other assemblies that have it, when the preferred
+    /// one did not decide.
+    /// </summary>
+    static Type? FindType(MetadataLoadContext mlc, string name, string preferAssembly, out string? ambiguous)
+    {
+        ambiguous = null;
+        var assemblies = mlc.GetAssemblies().OrderBy(a => a.GetName().Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var preferred = assemblies.FirstOrDefault(a => a.GetName().Name == preferAssembly);
         if (preferred != null)
         {
             var t = FindInAssembly(preferred, name);
             if (t != null) return t;
         }
-        foreach (var a in mlc.GetAssemblies())
+        Type? found = null;
+        var others = new List<string>();
+        foreach (var a in assemblies)
         {
             if (a == preferred) continue;
             var t = FindInAssembly(a, name);
-            if (t != null) return t;
+            if (t == null) continue;
+            if (found == null) found = t;
+            else others.Add(a.GetName().Name ?? "?");
         }
-        return null;
+        if (found != null && others.Count > 0)
+            ambiguous = $"'{name}' is in {found.Assembly.GetName().Name} and {string.Join(", ", others)}: {found.Assembly.GetName().Name} (first by name) was checked; name the right one with '# prefer-assembly: <name>'";
+        return found;
     }
 
     static Type? FindInAssembly(Assembly a, string name)
@@ -164,14 +180,23 @@ static class Program
 
     record Row(string Type, string Member, string Kind, string ExpectedType, int Line);
 
-    static List<Row> ReadRows(string path)
+    /// <summary>The rows of a members file, and the assembly its <c># prefer-assembly: &lt;name&gt;</c> line
+    /// names (<see cref="DefaultAssembly"/> without one).</summary>
+    static List<Row> ReadRows(string path, out string preferAssembly)
     {
         var rows = new List<Row>();
+        preferAssembly = DefaultAssembly;
         int line = 0;
         foreach (var raw in File.ReadLines(path))
         {
             line++;
             var l = raw.Trim();
+            const string directive = "# prefer-assembly:";
+            if (l.StartsWith(directive, StringComparison.OrdinalIgnoreCase))
+            {
+                preferAssembly = l.Substring(directive.Length).Trim();
+                continue;
+            }
             if (l.Length == 0 || l.StartsWith("#")) continue;
             // Columns may be tab- or space-separated (any run of whitespace): none of the four
             // fields (a CLR type/member name, or "-") ever contains a space itself.
@@ -185,7 +210,7 @@ static class Program
 
     static bool RunCheck(string managedDir, string membersPath)
     {
-        var rows = ReadRows(membersPath);
+        var rows = ReadRows(membersPath, out var prefer);
         using var mlc = OpenGame(managedDir);
         var typeCache = new Dictionary<string, Type?>();
         int pass = 0, fail = 0;
@@ -193,7 +218,10 @@ static class Program
         foreach (var row in rows)
         {
             if (!typeCache.TryGetValue(row.Type, out var type))
-                typeCache[row.Type] = type = FindType(mlc, row.Type);
+            {
+                typeCache[row.Type] = type = FindType(mlc, row.Type, prefer, out var ambiguous);
+                if (ambiguous != null) Console.WriteLine($"{membersPath}:{row.Line}: WARN  {ambiguous}");
+            }
 
             string status;
             if (type == null)
@@ -232,10 +260,11 @@ static class Program
         return fail == 0;
     }
 
-    static void RunDump(string managedDir, string typeName)
+    static void RunDump(string managedDir, string typeName, string preferAssembly)
     {
         using var mlc = OpenGame(managedDir);
-        var type = FindType(mlc, typeName);
+        var type = FindType(mlc, typeName, preferAssembly, out var ambiguous);
+        if (ambiguous != null) Console.WriteLine("WARN  " + ambiguous);
         if (type == null)
         {
             Console.WriteLine($"type '{typeName}' not found");

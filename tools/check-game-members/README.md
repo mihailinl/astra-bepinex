@@ -37,14 +37,27 @@ CharacterData isGrounded      instance  Boolean
 checked against the member's declared type; `object` accepts any reference type. It prints `PASS` or
 `FAIL` per row and exits with 1 when any row fails. Run it again after every game update.
 
+**Which assembly a type is looked for in.** `Assembly-CSharp` first (where a Unity game's own code
+usually is), then every other assembly of the folder in name order. A game whose code is elsewhere
+names it in one line of the file, and a type name two assemblies share then resolves to the game's:
+
+```
+# prefer-assembly: assembly_valheim
+```
+
+When a type name is in more than one assembly and the preferred one does not have it, the row says
+`WARN` and which one was checked (Valheim's `Character` is in `UnityEngine.TextCoreTextEngineModule`
+too: without the line above, the check read one or the other from run to run).
+
 ## `dump`: what does a type have?
 
 ```bash
-dotnet run --project tools/check-game-members -- dump "<game>/<Game>_Data/Managed" CharacterData
+dotnet run --project tools/check-game-members -- dump "<game>/<Game>_Data/Managed" CharacterData [assembly_valheim]
 ```
 
-Lists every field and property of the type (searched in every assembly of the folder) with its
-declared type: the material for the next `members.tsv` row.
+Lists every field and property of the type (searched in the assembly named last first, else in
+`Assembly-CSharp`, then in every assembly of the folder) with its declared type: the material for
+the next `members.tsv` row.
 
 ## `il2cpp`: what does a game lack that a plugin names?
 
