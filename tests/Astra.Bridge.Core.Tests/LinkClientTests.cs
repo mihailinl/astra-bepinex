@@ -364,6 +364,25 @@ public class LinkClientTests : IDisposable
     }
 
     [Fact]
+    public async Task The_link_file_is_read_again_only_for_a_new_token_never_on_every_retry()
+    {
+        var l = new TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        int dead = ((IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        WriteFile(port: dead); // Astra not reachable: the client retries
+        using var c = Client(write: false);
+        c.Start();
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        WriteFile(); // the same token, now naming the mock's port
+        // A client that read the file on every retry would connect at its next one (a connect to a
+        // closed port takes about a second on Windows); this one keeps what it read until its token is
+        // spent (the launcher may be replacing the file while it is open).
+        Assert.Null(await mock.Accept(2500));
+        Assert.False(c.Over);
+    }
+
+    [Fact]
     public async Task No_welcome_in_time_drops_the_connection_and_tries_again()
     {
         var t = new LinkClient.Timings { RetryMinMs = 10, RetryMaxMs = 40, WelcomeWithinMs = 200, KeeperMs = 20 };
