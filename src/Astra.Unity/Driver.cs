@@ -175,6 +175,7 @@ namespace Astra.Unity
 
         void LateUpdate()
         {
+            StepLink(); // Driver.Link.cs: the AI's channel, which goes on whatever happens to her picture
             if (faulted) return;
             Fenced("frame", () =>
             {
@@ -223,6 +224,8 @@ namespace Astra.Unity
                     else if (picked == null) lastPick = null;
                 }
             });
+            // What a Link tool asks before it moves her (AstraSdk.Drawn): drawn into the main camera, placed.
+            Runtime.Drawn = !faulted && compositor != null && compositor.Show && main != null && her.Placed;
             // The frame's optional parts, outside its fence: each answers for itself (Feature).
             if (faulted) return;
             StepCapture(wasLive && main != null); // Driver.Capture.cs
@@ -595,6 +598,7 @@ namespace Astra.Unity
         {
             faulted = true;
             Runtime.Connected = false;
+            Runtime.Drawn = false;
             log.LogError($"Astra stopped ({what}): {e}");
             // Take her out of the picture too: a Built-in camera keeps running our command buffer.
             try { compositor?.Dispose(); }
@@ -628,6 +632,9 @@ namespace Astra.Unity
         void OnDestroy()
         {
             Runtime.Connected = false;
+            Runtime.Drawn = false;
+            try { CloseLink(); }
+            catch (Exception) { /* closing anyway */ }
             Compat.UnhookAll();
             depth.ReleaseAll();
             StopCapture();

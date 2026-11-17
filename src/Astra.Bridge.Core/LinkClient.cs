@@ -751,6 +751,9 @@ namespace Astra.Bridge
 
         static int Bytes(string json) => Encoding.UTF8.GetByteCount(json);
 
+        /// <summary>Whether <paramref name="data"/>, sent as the context, is within <see cref="MaxContextBytes"/>.</summary>
+        internal static bool ContextFits(LinkData data) => Bytes(Message("context", null, data)) <= MaxContextBytes;
+
         public static bool IsEventWord(string word)
         {
             foreach (var w in EventWords)

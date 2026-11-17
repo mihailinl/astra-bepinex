@@ -299,6 +299,49 @@ mirrors.
   dark is darker than most (Lethal Company uses `UseLook(floor: 0.10f)`). The engine bounds the floor
   to 0.05–0.40 and the ceiling to 0.8–2.0. Set it only after looking at her in the game.
 
+### Astra's AI: `Link`
+
+`Link` is the game's side of Astra Link (AstraPlugins `spec/games/link-v1.md`): tools Astra's AI may
+call in your game, the events and the context it is told, your triggers, and a voice key on her. It
+is its own socket to the daemon, never the bridge that draws her.
+
+```csharp
+astra.Link.Tool("come_here", args => AstraSdk.Drawn
+    ? LinkResult.Done(new LinkData().Set("arrived", Viking.WalkToPlayer()))
+    : LinkResult.Refuse(LinkRefusal.NotHolding));
+astra.Link.Tool("time_until_night", _ => LinkResult.Done(new LinkData().Set("minutes", Sky.MinutesToNight)));
+astra.OnFrame(f =>
+{
+    if (Viking.JustFell) astra.Link.Event("player_fell", new LinkData().Set("height_m", Viking.FallHeight));
+    astra.Link.Quiet(Viking.InMenu || Viking.InCutscene);
+    if (Time.frameCount % 60 == 0) astra.Link.Context(Viking.Facts());
+});
+```
+
+- **It is off unless Astra turns it on.** The foundation connects only when Astra started the game
+  with a link file for your integration: an integration from the signed catalogue that declares
+  `[integration.link]` in its manifest (§8). Astra then grants only what the user switched on for
+  your game ("AI may act", "Tell Astra what happens", "She may speak on her own"), all off by
+  default. Without a link file every call does nothing: `Tool` keeps the handler, `Event`, `Trigger`
+  and `Talk` answer false. So you write the same code either way, and test the rest without Astra.
+- **Tools** run on the main thread, in the frame, and answer within 10 s or the call is refused
+  `busy`. Answer with what the tool's declared result schema names: enums, numbers and booleans
+  only, never a string a player wrote. Refuse with a `LinkRefusal` code: `not_holding` for a tool
+  that moves or turns her while `AstraSdk.Drawn` is false, `not_in_world` in a menu or a loading
+  screen, `player_dead`, `unknown_target`, `bad_args`. A handler that throws answers `failed`, and
+  your integration stays on. A tool that only reads the game does not need her drawn.
+- **Events** are the seven v1 words (`session_started`, `session_ended`, `player_hurt`,
+  `player_fell`, `player_died`, `player_revived`, `goal_reached`) that your manifest declares. Send
+  one at the change, once, never every frame while a state holds: a state is the context, or a
+  raw fact for her animations (§6).
+- **The context** is what the game is like now, under your declared `context` schema. Set it when it
+  changes or about once a second; it is kept and said when a session starts.
+- **Quiet** says the game is in a menu, a cutscene or paused, and Astra does not speak on her own
+  meanwhile. Set it every frame if that is easier: only a change is sent.
+- **`GrantsChanged`** fires when a session starts and whenever the user flips a switch: stop at once
+  what is no longer granted. **`Ended`** fires when Astra ends Link for good.
+- Hiding her (the toggle key, `General.Enabled`) does not close Link. Astra's switches decide it.
+
 ### When your code throws
 
 If one of your callbacks throws, or returns a player or a position that is not a finite number, the
@@ -505,6 +548,12 @@ release without them:
   through (Doorstop's proxy, placed beside the game's program by `[[game_files]]`);
 - `[integration.capabilities] companion = ["presentation"]` says that `[[config_writes]]` hands the
   foundation the avatar bridge's `${bridge_token}`.
+
+If your integration uses `Link` (§5), declare it in `[integration.link]`: its tools with their
+`params` and `result` schemas and `danger`, its event words, its `context` schema. AstraPlugins
+`spec/games/manifest.md` §2.6 is the contract and `spec/games/link-v1.md` §6 the schema profile.
+Astra shows the declaration on the Workshop's sheet before anyone installs it, and grants nothing it
+does not name. Without the table, `Link` stays off.
 
 Keep `[[files]]`, `[[game_files]]`, `[launch]` and `[[config_writes]]` as they are. The `winhttp.dll`
 digest is the one of the Doorstop proxy that BepInEx ships, and the zip carries that very file.
