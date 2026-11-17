@@ -495,9 +495,13 @@ namespace Astra.Bridge
                     resumeWith = resume;
                     if (resumeWith == null)
                     {
-                        // No session yet, or it cannot be resumed: the file's token — read again each
-                        // time, since a new Play writes a new one (and may name a new port).
-                        file = Reread() ?? file;
+                        // No session yet, or it cannot be resumed: the file's token. The file is read
+                        // again only for a NEW one, once ours is spent (a hello refused not_granted, a
+                        // resume refused): a new Play writes a new token, and may name a new port. Never
+                        // on every retry: each read opens and closes it at once (LinkFile.Read), and on a
+                        // file system without POSIX renames (FAT32, exFAT) the launcher cannot replace a
+                        // file that is open at that moment, so Play would fail.
+                        if (file == null || file.Token == spentToken) file = Reread() ?? file;
                         if (file == null || file.Token == spentToken)
                         {
                             Stop(spentToken == null
