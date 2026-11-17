@@ -6,5 +6,8 @@ namespace Astra.Unity
     {
         /// <summary>Astra's engine answered and the frame ring is mapped.</summary>
         public static bool Connected { get; internal set; }
+
+        /// <summary>She was drawn in the last frame: connected, composited into the main camera, placed.</summary>
+        public static bool Drawn { get; internal set; }
     }
 }

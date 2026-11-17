@@ -76,6 +76,15 @@ namespace Astra.Sdk
         /// <summary>Is Astra's engine connected (her pictures arriving)?</summary>
         public static bool Connected => Astra.Unity.Runtime.Connected;
 
+        /// <summary>
+        /// Is she drawn in this game right now: the engine connected, her picture composited into the
+        /// player's camera (not hidden by the toggle key or <c>General.Enabled</c>), and placed in the
+        /// world? As of the last frame. A Link tool that moves her or turns her answers
+        /// <see cref="LinkRefusal.NotHolding"/> while this is false; one that only reads the game does not
+        /// need her.
+        /// </summary>
+        public static bool Drawn => Astra.Unity.Runtime.Drawn;
+
         /// <summary>For the foundation: told when an integration registers (old, new).</summary>
         internal static event Action<GameIntegration, GameIntegration> Registered;
 
@@ -100,6 +109,7 @@ namespace Astra.Sdk
         {
             Id = id;
             Game = game;
+            Link.Warn = m => AstraSdk.Warn?.Invoke(m);
         }
 
         public string Id { get; }
@@ -111,6 +121,16 @@ namespace Astra.Sdk
 
         /// <summary>Animation by name: the same cues Astra's own brain sends.</summary>
         public Cues Cues { get; } = new Cues();
+
+        /// <summary>
+        /// Astra Link: the tools Astra's AI may call in this game, the events and context it is told, the
+        /// triggers and the voice key (<see cref="GameLink"/>). It is live only when Astra started the game
+        /// with a link file for this integration (an integration from the signed catalogue, declaring
+        /// <c>[integration.link]</c> in its manifest), and only for what the user switched on; otherwise
+        /// every call does nothing. It does not follow her picture: hiding her does not close it, and its own
+        /// <see cref="GameLink.OnFrame"/> runs while <see cref="OnFrame"/> does not (she is not drawn).
+        /// </summary>
+        public GameLink Link { get; } = new GameLink();
 
         /// <summary>
         /// Who she accompanies. Called every frame; return null when there is no player right now (a
@@ -181,7 +201,8 @@ namespace Astra.Sdk
         }
 
         /// <summary>Called every frame before the brain: set raw facts in <see cref="FrameContext.Params"/>,
-        /// send cues. Several handlers run in the order they were added.</summary>
+        /// send cues. Several handlers run in the order they were added. Only while she is drawn (the
+        /// engine connected, a camera, not hidden): what Astra Link says goes in <see cref="GameLink.OnFrame"/>.</summary>
         public GameIntegration OnFrame(Action<FrameContext> handler)
         {
             FrameHandlers.Add(handler);

@@ -56,9 +56,9 @@ public class LinkClientTests : IDisposable
         return c;
     }
 
-    static string B(bool b) => b ? "true" : "false";
+    internal static string B(bool b) => b ? "true" : "false";
 
-    static string Welcome(string resume, string tools = "[]", string events = "[]", bool context = false, bool speaks = false,
+    internal static string Welcome(string resume, string tools = "[]", string events = "[]", bool context = false, bool speaks = false,
         bool talk = false, string triggers = "[]") =>
         "{\"t\":\"welcome\",\"granted\":{\"tools\":" + tools + ",\"triggers\":" + triggers + ",\"events\":" + events +
         ",\"context\":" + B(context) + ",\"skill\":false,\"speaks\":" + B(speaks) + ",\"talk\":" + B(talk) + "}," +
@@ -476,7 +476,7 @@ public class LinkClientTests : IDisposable
 
     // ---- the mock daemon ---------------------------------------------------------------------------
 
-    sealed class Mock : IDisposable
+    internal sealed class Mock : IDisposable
     {
         readonly HttpListener http = new HttpListener();
         Task<HttpListenerContext> pending;
@@ -512,7 +512,7 @@ public class LinkClientTests : IDisposable
         }
     }
 
-    sealed class Peer
+    internal sealed class Peer
     {
         readonly WebSocket ws;
         public WebHeaderCollection Headers { get; }

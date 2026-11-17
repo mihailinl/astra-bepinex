@@ -88,13 +88,19 @@ namespace Astra.Bridge
             string text;
             try
             {
-                var info = new FileInfo(path);
-                if (info.Length > MaxBytes)
+                // Shared for writing and deleting: a new Play while the game runs replaces the file (a
+                // rename over it, a write), which Windows refuses while someone holds it open without
+                // FILE_SHARE_WRITE / FILE_SHARE_DELETE — the reader must never be what stands in the way.
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                 {
-                    why = $"the link file '{path}' is {info.Length} bytes, more than a link file ever is";
-                    return null;
+                    if (fs.Length > MaxBytes)
+                    {
+                        why = $"the link file '{path}' is {fs.Length} bytes, more than a link file ever is";
+                        return null;
+                    }
+                    using (var reader = new StreamReader(fs, System.Text.Encoding.UTF8, true))
+                        text = reader.ReadToEnd();
                 }
-                text = File.ReadAllText(path);
             }
             catch (Exception e) when (e is ArgumentException || e is IOException || e is UnauthorizedAccessException || e is NotSupportedException || e is System.Security.SecurityException)
             {

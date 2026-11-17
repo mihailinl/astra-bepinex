@@ -211,6 +211,13 @@ namespace Astra.Bridge
             lock (tools) tools[name] = handler ?? throw new ArgumentNullException(nameof(handler));
         }
 
+        /// <summary>Forget every tool handler (a call then answers <c>unknown_tool</c>): before the session
+        /// is handed to the same integration registered anew, so no handler of the old one runs.</summary>
+        internal void ClearTools()
+        {
+            lock (tools) tools.Clear();
+        }
+
         public void Start()
         {
             if (thread != null || Stopped) return;
@@ -617,8 +624,11 @@ namespace Astra.Bridge
                     string tool = m.TryGetValue("tool", out var tl) ? tl as string : null;
                     if (string.IsNullOrEmpty(id) || id.Length > 128 || string.IsNullOrEmpty(tool)) return;
                     var args = m.TryGetValue("args", out var a) ? a as Dictionary<string, object> : null;
+                    // Its arrival is stamped before it counts as waiting: whoever sees PendingCalls grow
+                    // (a test moving the clock) never sees a call whose time is not yet taken.
+                    double at = clock();
                     Interlocked.Increment(ref pendingCalls);
-                    inbox.Enqueue(new Inbound { Kind = InKind.Call, Session = Session, Id = id, Tool = LocalToolName(tool), Args = new LinkArgs(args), At = clock() });
+                    inbox.Enqueue(new Inbound { Kind = InKind.Call, Session = Session, Id = id, Tool = LocalToolName(tool), Args = new LinkArgs(args), At = at });
                     return;
                 }
                 case "end":
@@ -750,6 +760,9 @@ namespace Astra.Bridge
         }
 
         static int Bytes(string json) => Encoding.UTF8.GetByteCount(json);
+
+        /// <summary>Whether <paramref name="data"/>, sent as the context, is within <see cref="MaxContextBytes"/>.</summary>
+        internal static bool ContextFits(LinkData data) => Bytes(Message("context", null, data)) <= MaxContextBytes;
 
         public static bool IsEventWord(string word)
         {
