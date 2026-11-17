@@ -132,7 +132,7 @@ namespace Astra.Unity
                 if (compositor == null) log.LogError($"Astra cannot be drawn in this game: {Compositor.Failure}");
                 else
                 {
-                    compositor.Bind(shots, settings, ViewOf);
+                    compositor.Bind(shots, settings, ViewOf, cam => cam == main);
                     compositor.Note = m => log.LogInfo("compositor: " + m);
                 }
                 shadow = new ShadowCaster { Note = m => log.LogInfo(m) };
@@ -230,9 +230,12 @@ namespace Astra.Unity
             // asks (or whose pipeline asset says so) — without it she is drawn over everything
             // (Compositor.DepthState says so). Held only while she is drawn into the main camera.
             HoldDepth(compositor != null && compositor.Show ? main : null);
-            // Where her picture is looked up from: the middle of her body, along her own up.
+            // Where her picture is looked up from: the middle of her body, along her own up, from the
+            // point her placement names (her feet, or a bone such as her hips: AnchorHeight).
             if (compositor != null)
-                compositor.HerCentre = her.Placed ? her.Position + (her.Up ?? Vector3.up) * (HerHeight * scale * 0.5f) : (Vector3?)null;
+                compositor.HerCentre = her.Placed
+                    ? her.Position + (her.Up ?? Vector3.up) * (HerHeight * scale * (float)(0.5 - AnchorHeight.Of(her.Anchor)))
+                    : (Vector3?)null;
             if (main == null) return;
             if (wasLive && whereLine.Due) sayingWhere.Run(() => whereLine.Check(main, her, HerHeight * scale, compositor, log, settings.PictureAge.Value), warn);
         }

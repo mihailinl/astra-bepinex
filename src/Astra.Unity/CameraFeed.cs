@@ -50,6 +50,10 @@ namespace Astra.Unity
         public float TanX, TanY;
         /// <summary>When it was sent (unscaled time): how old a picture drawn for it is when shown.</summary>
         public float SentAt;
+        /// <summary>The middle of her body when it was sent (<see cref="HasHer"/>): her picture is moved
+        /// as the camera moved relative to HER (<c>Reprojection.Rows</c>), and she may run with it.</summary>
+        public Vector3 Her;
+        public bool HasHer;
     }
 
     /// <summary>
@@ -65,6 +69,11 @@ namespace Astra.Unity
         readonly RecentById<Shot> history = new RecentById<Shot>(1024, 1.0);
         long next;
 
+        /// <summary>The newest cameras are found however old they are: a game frozen for more than a
+        /// second (loading a world) sends none meanwhile, and the picture that comes back after it is
+        /// still drawn for one of them — by age alone she was gone until the game ran again.</summary>
+        const int NewestFoundAtAnyAge = 8;
+
         /// <summary>Why the last <see cref="Message"/> refused its camera, as a line for the log; null
         /// when it built a message, or when the protocol's builder refused it instead (then
         /// <c>Messages.Rejection</c> says why).</summary>
@@ -73,8 +82,9 @@ namespace Astra.Unity
         /// <summary>Build the <c>cam</c> message for <paramref name="cam"/>, as <paramref name="view"/>,
         /// now (null if it cannot be sent, and <see cref="Refusal"/> says why). Its field of view and
         /// aspect are read off the camera's PROJECTION, which a game may set explicitly (a mirror's
-        /// camera borrows the player camera's).</summary>
-        public string Message(Camera cam, int maxHeight, int view = 0)
+        /// camera borrows the player camera's). <paramref name="her"/> is the middle of her body now,
+        /// kept with the camera (null while she is not placed).</summary>
+        public string Message(Camera cam, int maxHeight, int view = 0, Vector3? her = null)
         {
             Refusal = null;
             var pose = CameraPose.Of(cam);
@@ -106,6 +116,8 @@ namespace Astra.Unity
                 TanX = tanX,
                 TanY = tanY,
                 SentAt = Time.unscaledTime,
+                Her = her ?? default,
+                HasHer = her.HasValue,
             };
             double fovY = 2 * Math.Atan(tanY) * (180 / Math.PI);
             string json = Messages.Cam(shot.Id, Wire.Of(shot.Pos), Wire.Of(shot.Fwd), Wire.Of(shot.Up), fovY, w, h, null, view);
@@ -133,7 +145,10 @@ namespace Astra.Unity
         /// <summary>The id of the newest camera sent (0 before the first).</summary>
         public long LastId => next;
 
-        /// <summary>The camera sent as <paramref name="id"/>, while it is no older than a second.</summary>
-        public bool Find(long id, out Shot shot) => history.Find(id, Time.unscaledTime, out shot);
+        /// <summary>The camera sent as <paramref name="id"/>, while it is no older than a second — or, if it
+        /// is one of the newest few sent, however old it is.</summary>
+        public bool Find(long id, out Shot shot) =>
+            history.Find(id, Time.unscaledTime, out shot)
+            || (id > next - NewestFoundAtAnyAge && id <= next && history.FindHeld(id, out shot));
     }
 }

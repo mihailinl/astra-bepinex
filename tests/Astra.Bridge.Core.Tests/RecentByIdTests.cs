@@ -106,6 +106,21 @@ public class RecentByIdTests
         Assert.True(sent.Find(-3, 0, out long got) && got == 9);
     }
 
+    /// <summary>A game frozen for longer than the age (loading a world) sends no camera meanwhile: the
+    /// picture that comes back after it is for one of the newest, found while it is held.</summary>
+    [Fact]
+    public void A_held_entry_is_found_at_any_age_until_it_is_overwritten()
+    {
+        var sent = new RecentById<long>(8, MaxAge);
+        sent.Put(5, 10.0, 50);
+        Assert.False(sent.Find(5, 14.0, out _));
+        Assert.True(sent.FindHeld(5, out long got) && got == 50);
+        sent.Put(13, 14.0, 130); // the same slot, 8 later
+        Assert.False(sent.FindHeld(5, out _));
+        Assert.True(sent.FindHeld(13, out got) && got == 130);
+        Assert.False(sent.FindHeld(0, out _));
+    }
+
     [Fact]
     public void A_capacity_below_one_or_an_age_not_above_zero_is_refused()
     {
