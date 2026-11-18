@@ -5,13 +5,16 @@
 # from BRIDGE.md and diffs the two.
 #
 # Usage: tools/check-protocol-sync.sh [--write]
-#   ASTRA_ENGINE_DIR  the engine checkout (default: ../astra-companion/astra-avatar-engine, beside this
-#                     repository). Without one this prints SKIP and exits 0: contributors need none.
+#   ASTRA_ENGINE_DIR  the engine checkout (default: ../astra-companion, beside this repository; its
+#                     BRIDGE.md is docs/bridge.md since the engine became the repository's root, a
+#                     BRIDGE.md at the top in an older checkout). Without one this prints SKIP and exits
+#                     0: contributors need none.
 #   --write           rewrite PROTOCOL.md's body from BRIDGE.md and its "synced … on" date to today.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-ENGINE=${ASTRA_ENGINE_DIR:-../astra-companion/astra-avatar-engine}
-BRIDGE=$ENGINE/BRIDGE.md
+ENGINE=${ASTRA_ENGINE_DIR:-../astra-companion}
+BRIDGE=$ENGINE/docs/bridge.md
+[ -f "$BRIDGE" ] || BRIDGE=$ENGINE/BRIDGE.md
 DOC=docs/PROTOCOL.md
 # The last line of PROTOCOL.md's own header; everything after it is generated.
 MARK='<!-- Everything below is generated from the engine'"'"'s BRIDGE.md by tools/check-protocol-sync.sh --write: edit BRIDGE.md, not this. -->'

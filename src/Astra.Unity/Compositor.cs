@@ -66,6 +66,56 @@ namespace Astra.Unity
         /// <summary>The ring frames come from (null between sessions).</summary>
         public FrameRing Ring { get; set; }
 
+        /// <summary>The revision of the <c>hello.bones</c> list this session streams
+        /// (<see cref="HelloReply.BonesRev"/>; 0 = none asked): a frame's bones section of another
+        /// revision indexes another list and is never taken.</summary>
+        public int BonesRev { get; set; }
+
+        // The bones of the main view's picture taken last (glTF, the ring's own numbers), and the
+        // copy being made of the next one — kept only once that frame is taken whole.
+        BonePose[] bonesTaken = new BonePose[Messages.MaxBones], bonesNext = new BonePose[Messages.MaxBones];
+        int bonesTakenCount;
+
+        /// <summary>Called (on the main thread, from the camera callbacks) each time the MAIN view's
+        /// picture changes — a new frame taken, or none to show — so whatever follows her bones
+        /// (<see cref="TryMainBone"/>) moves with the picture it is drawn beside. On Built-in that is
+        /// the main camera's pre-cull, before the game's scene is rendered.</summary>
+        public Action MainTaken;
+
+        /// <summary>The pose of the bone at <paramref name="index"/> in the hello's list, in the main
+        /// view's picture taken last; false when that picture carried none of it.</summary>
+        public bool TryMainBone(int index, out BonePose pose)
+        {
+            for (int i = 0; i < bonesTakenCount; i++)
+            {
+                if (bonesTaken[i].Index != index) continue;
+                pose = bonesTaken[i];
+                return true;
+            }
+            pose = default;
+            return false;
+        }
+
+        /// <summary>Copy <paramref name="f"/>'s bones into <see cref="bonesNext"/> (read in place: the
+        /// picture's own seqlock check, after it, vouches for them too). 0 when it carries none of this
+        /// session's list.</summary>
+        int CopyBones(ref RingFrame f)
+        {
+            if (!f.HasBones || BonesRev == 0 || f.Bones.Rev != (uint)BonesRev) return 0;
+            int n = Math.Min(f.Bones.Count, bonesNext.Length);
+            for (int i = 0; i < n; i++) bonesNext[i] = f.Bones[i];
+            return n;
+        }
+
+        void MainChanged(int bones)
+        {
+            var taken = bonesTaken;
+            bonesTaken = bonesNext;
+            bonesNext = taken;
+            bonesTakenCount = bones;
+            MainTaken?.Invoke();
+        }
+
         /// <summary>Whether she is shown at all (the toggle, General.Enabled, and a live link).</summary>
         public bool Show { get; set; } = true;
 
@@ -318,6 +368,7 @@ namespace Astra.Unity
                 v.Have = false;
                 v.Seen = floor;
             }
+            bonesTakenCount = 0;
         }
 
         /// <summary><paramref name="view"/> was given to another camera: what it showed was another
@@ -338,8 +389,12 @@ namespace Astra.Unity
             if (f.Width < 1 || f.Height < 1)
             {
                 v.Have = false;
+                if (view == 0) MainChanged(0);
                 return v;
             }
+            // Her bones beside THIS picture (flag 256), copied before it: the picture's seqlock check
+            // below vouches for both, and they are kept only if it is taken.
+            int bones = view == 0 ? CopyBones(ref f) : 0;
             if (view == 0 && Time.unscaledTime >= nextCoverage)
             {
                 nextCoverage = Time.unscaledTime + 5f;
@@ -352,12 +407,17 @@ namespace Astra.Unity
                 // The engine reused the slot while we copied: this copy is torn and is never applied.
                 // The GPU still holds the last whole picture, so it goes on showing — unless the
                 // textures were made anew just now, and hold nothing yet.
-                if (fresh) v.Have = false;
+                if (fresh)
+                {
+                    v.Have = false;
+                    if (view == 0) MainChanged(0); // no picture of her: nothing in her hand either
+                }
                 return v;
             }
             Pictures++;
             v.Shown = f;
             v.Have = true;
+            if (view == 0) MainChanged(bones);
             return v;
         }
 

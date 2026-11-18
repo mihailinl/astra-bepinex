@@ -204,6 +204,9 @@ namespace Astra.Bridge
         /// <summary>The most EXTRA directional lights one <c>light</c> may carry, besides <c>sun</c>.</summary>
         public const int MaxSuns = 3;
 
+        /// <summary>The most bones one <c>hello.bones</c> may name (the engine refuses a hello with more).</summary>
+        public const int MaxBones = 8;
+
         /// <summary>A light level the engine takes: 0..16.</summary>
         static double Level(double v) => Math.Max(0, Math.Min(16, v));
 
@@ -261,7 +264,26 @@ namespace Astra.Bridge
         /// <param name="caps">What THIS side understands beyond the first contract (<c>caps</c>), e.g.
         /// <c>"warn"</c>: the engine then sends those optional messages; null or empty = not said.</param>
         public static string Hello(string client, string token, string shadow, string game, string foundation, string integration, bool crop,
-            IList<ParamDecl> parameters, IList<string> caps)
+            IList<ParamDecl> parameters, IList<string> caps) =>
+            Hello(client, token, shadow, game, foundation, integration, crop, parameters, caps, null);
+
+        /// <param name="client">Who is asking (a log line on the engine's side).</param>
+        /// <param name="token">The engine's bridge token, if it has one.</param>
+        /// <param name="shadow">Which of her shadows the game reads (see the overloads above).</param>
+        /// <param name="game">The game's display name; null = not said.</param>
+        /// <param name="foundation">This foundation's version; null = not said.</param>
+        /// <param name="integration">The game's integration id, when one is registered; null = none.</param>
+        /// <param name="crop">Ask for her rectangle of each picture only (see the overload above).</param>
+        /// <param name="parameters">The raw parameters this game sends (see the overload above).</param>
+        /// <param name="caps">What THIS side understands beyond the first contract (see the overload above).</param>
+        /// <param name="bones">Her bones whose POSE the game is given in every slot beside her picture
+        /// (flag 256, <see cref="FrameRing.FlagBones"/>): VRM 1.0 humanoid bone names, camelCase
+        /// (<c>"rightHand"</c>, <c>"head"</c>…) — to draw an item in her hand in lockstep with her
+        /// picture. Null or empty = none. An empty or repeated name, and any past the
+        /// <see cref="MaxBones"/>th, are left out (more would refuse the whole hello); a name that is no
+        /// humanoid bone is the engine's to drop (it warns <c>bone_unknown</c>).</param>
+        public static string Hello(string client, string token, string shadow, string game, string foundation, string integration, bool crop,
+            IList<ParamDecl> parameters, IList<string> caps, IList<string> bones)
         {
             var w = Begin("hello").Num("v", ProtocolVersion).Str("client", client ?? "unknown");
             if (!string.IsNullOrEmpty(token)) w.Str("token", token);
@@ -283,7 +305,25 @@ namespace Astra.Bridge
                 }
                 w.CloseArray();
             }
+            var bonesSent = BonesForHello(bones);
+            if (bonesSent.Count > 0) w.Strs("bones", bonesSent);
             return End(w);
+        }
+
+        /// <summary>The <c>hello.bones</c> list as sent: <paramref name="bones"/> without empty or repeated
+        /// names, at most <see cref="MaxBones"/>, in order. The INDEX of a bone in a frame's section is its
+        /// place in THIS list (<see cref="BonePose.Index"/>).</summary>
+        public static List<string> BonesForHello(IList<string> bones)
+        {
+            var named = new List<string>();
+            if (bones == null) return named;
+            foreach (var bone in bones)
+            {
+                if (named.Count >= MaxBones) break;
+                if (string.IsNullOrEmpty(bone) || named.Contains(bone)) continue;
+                named.Add(bone);
+            }
+            return named;
         }
 
         /// <summary>The main camera's <c>cam</c> (view 0) — the 0.2 signature, kept so a mod built
@@ -588,6 +628,15 @@ namespace Astra.Bridge
         /// switched on for the integration this game's hello named; null = do not capture.</summary>
         public string Inbox;
 
+        /// <summary>The bones streamed in every slot (flag 256), in order: the ones of our
+        /// <c>hello.bones</c> the engine knows; null = none, or an engine without <c>bones</c>.</summary>
+        public List<string> Bones;
+
+        /// <summary>The REVISION of the list a frame's bones section indexes (1..8191; 0 = none): use a
+        /// section only when its <see cref="BonesView.Rev"/> equals this — frames captured before the
+        /// engine applied our list carry another.</summary>
+        public int BonesRev;
+
         /// <summary>Is <paramref name="cap"/> one of <paramref name="caps"/>? Null <paramref name="caps"/>
         /// means an engine from before capability negotiation: taken for "supports everything a
         /// foundation without this check already sent", never a refusal.</summary>
@@ -608,6 +657,8 @@ namespace Astra.Bridge
                 Views = Int(m, "views"),
                 Caps = m.TryGetValue("caps", out var caps) ? caps as List<string> : null,
                 Inbox = m.TryGetValue("inbox", out var inbox) && inbox is string dir && dir.Length > 0 ? dir : null,
+                Bones = m.TryGetValue("bones", out var bones) ? bones as List<string> : null,
+                BonesRev = Int(m, "bones_rev"),
             };
         }
 

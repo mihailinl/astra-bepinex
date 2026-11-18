@@ -140,6 +140,13 @@ namespace Astra.Bridge
         /// unless the engine's last hello said it does not take them.</summary>
         public Func<ParamDecl[]> Params { get; set; }
 
+        /// <summary>Her bones whose pose this game is given beside every picture (<c>hello.bones</c>,
+        /// flag 256): VRM humanoid names, <c>"rightHand"</c>… ASKED on the link's own thread at every
+        /// hello, like <see cref="Params"/>; null, or null or empty from it = none. Sent unless the
+        /// engine's last hello said it does not stream them (an older engine ignores the key).
+        /// A frame's section is read against <see cref="HelloReply.BonesRev"/>.</summary>
+        public Func<IList<string>> Bones { get; set; }
+
         /// <summary>Bumped on every engine hello: a new session — map the ring again.</summary>
         public int Session => Volatile.Read(ref session);
 
@@ -226,7 +233,8 @@ namespace Astra.Bridge
                     // hello.params goes to an engine that takes it, or whose caps are not known yet (an
                     // older engine ignores it): like the shadow word, never to one that said otherwise.
                     var declared = Supports("hello.params") ? Params?.Invoke() : null;
-                    if (!socket.SendText(Messages.Hello(client, token, EffectiveShadow(), Game, Foundation, Integration, Crop, declared, OurCaps)))
+                    var bones = Supports("bones") ? Bones?.Invoke() : null;
+                    if (!socket.SendText(Messages.Hello(client, token, EffectiveShadow(), Game, Foundation, Integration, Crop, declared, OurCaps, bones)))
                         throw new IOException("closed before hello");
                     State($"connected to Astra on {host}:{port}");
                     while (true)
@@ -284,7 +292,8 @@ namespace Astra.Bridge
                 LastError = null;
                 Interlocked.Increment(ref session);
                 ready = true;
-                Log?.Invoke($"Astra {reply.EngineVersion}: frames in '{reply.Shm}', up to {reply.MaxWidth}x{reply.MaxHeight}");
+                Log?.Invoke($"Astra {reply.EngineVersion}: frames in '{reply.Shm}', up to {reply.MaxWidth}x{reply.MaxHeight}"
+                    + (reply.Bones != null && reply.Bones.Count > 0 ? $"; her bones {string.Join(", ", reply.Bones)} (revision {reply.BonesRev})" : ""));
                 return;
             }
             m.TryGetValue("t", out var t);

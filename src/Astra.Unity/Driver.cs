@@ -134,6 +134,9 @@ namespace Astra.Unity
                 {
                     compositor.Bind(shots, settings, ViewOf, cam => cam == main);
                     compositor.Note = m => log.LogInfo("compositor: " + m);
+                    // Driver.Bones.cs: the items held in her hand follow each main picture taken.
+                    compositor.MainTaken = PlaceHeld;
+                    Runtime.Bone = TryBone;
                 }
                 shadow = new ShadowCaster { Note = m => log.LogInfo(m) };
                 light.Note = m => log.LogInfo(m);
@@ -228,6 +231,8 @@ namespace Astra.Unity
             Runtime.Drawn = !faulted && compositor != null && compositor.Show && main != null && her.Placed;
             // The frame's optional parts, outside its fence: each answers for itself (Feature).
             if (faulted) return;
+            try { StepHeld(); } // Driver.Bones.cs: no picture of her, no item in her hand
+            catch (Exception e) { Once("held", $"the items in her hand could not be hidden: {e.Message}"); }
             StepCapture(wasLive && main != null); // Driver.Capture.cs
             // Her depth test reads the camera's depth texture; URP renders one only for a camera that
             // asks (or whose pipeline asset says so) — without it she is drawn over everything
@@ -275,6 +280,8 @@ namespace Astra.Unity
                     // says the list as it is then): only with an integration (the engine keeps the
                     // list per integration id, and nothing without one).
                     link.Params = () => declared?.ForHello();
+                    // Her bones beside every picture (Driver.Bones.cs), asked the same way.
+                    link.Bones = BonesForHello;
                     TellLink();
                     ringSession = 0;
                     link.Start();
@@ -440,6 +447,7 @@ namespace Astra.Unity
         void TellLink()
         {
             declared = integration?.Declared;
+            bonesOf = integration;
             if (link == null) return;
             link.Game = integration?.Game ?? Application.productName;
             link.Integration = integration?.Id;
@@ -512,6 +520,7 @@ namespace Astra.Unity
                 if (compositor != null) compositor.Ring = ring;
                 // Only frames this session publishes; the ones still in the ring are the last engine's.
                 compositor?.Reset(ring.Counter);
+                BonesSession(); // the bones list and revision this session's frames carry
                 shadow?.Reset(ring.Counter);
                 // Views besides the main one: as many as the engine draws and its ring holds (none for an
                 // engine from before views, which would take every camera for the main one, or one that
@@ -599,6 +608,9 @@ namespace Astra.Unity
             faulted = true;
             Runtime.Connected = false;
             Runtime.Drawn = false;
+            Runtime.Bone = null;
+            try { HideHeld(integration); }
+            catch (Exception) { /* stopping anyway */ }
             log.LogError($"Astra stopped ({what}): {e}");
             // Take her out of the picture too: a Built-in camera keeps running our command buffer.
             try { compositor?.Dispose(); }
@@ -633,6 +645,9 @@ namespace Astra.Unity
         {
             Runtime.Connected = false;
             Runtime.Drawn = false;
+            Runtime.Bone = null;
+            try { HideHeld(integration); }
+            catch (Exception) { /* closing anyway */ }
             try { CloseLink(); }
             catch (Exception) { /* closing anyway */ }
             Compat.UnhookAll();
