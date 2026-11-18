@@ -337,8 +337,8 @@ astra.Link.OnFrame(() =>
   need her drawn. **The list of codes is closed** (`LinkRefusal.Codes`): `LinkResult.Refuse` throws on
   any other, and Astra would hand the model any other as `bad_result` anyway, so a refusal never
   carries your own words.
-- **Events** are the seven v1 words (`session_started`, `session_ended`, `player_hurt`,
-  `player_fell`, `player_died`, `player_revived`, `goal_reached`) that your manifest declares. Send
+- **Events** are the v1 words (`session_started`, `session_ended`, `player_hurt`, `player_fell`,
+  `player_died`, `player_revived`, `goal_reached`, `work_ended`) that your manifest declares. Send
   one at the change, once, never every frame while a state holds: a state is the context, or a
   raw fact for her animations (§6).
 - **The context** is what the game is like now, under your declared `context` schema. Set it when it
@@ -367,6 +367,12 @@ part:
   `LinkRefusal.NotAlone` while the player is not alone.
 - **Answer at once.** Work that takes longer than a call (a walk to the trees) answers `started` and
   goes on in the game; how it goes is your context, or a later call's result.
+- **Say when it ends**: declare the event `work_ended` and send it once when a job ends on its own
+  or by your rules (`stopped` for the ends below), with a `reason` of `LinkClient.WorkEndReasons` and
+  a `progress` count: `Link.Event("work_ended", new LinkData().Set("reason", "done").Set("progress",
+  20))`. Astra may start a short turn of its own for it, so that she says how it went. Never send it
+  for a job the person's own call ended (your stop tool, a new job in its place): that call's result
+  already said so.
 - **Stop all of it** when `astra.Link.StopWork` fires (the switch went off, Astra ended the session,
   the connection dropped or was closed), and on your own reasons: another player joined, the player
   died or left the world. A resume does not start it again.

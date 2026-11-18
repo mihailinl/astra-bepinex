@@ -41,10 +41,20 @@ namespace Astra.Bridge
         public const int ProtocolVersion = 1;
 
         /// <summary>The closed list of event words in v1 (<c>link-v1.md</c> §5, "Event words"). An event is
-        /// sent once, at the moment of the change; a state that lasts is never an event.</summary>
+        /// sent once, at the moment of the change; a state that lasts is never an event. <c>work_ended</c>
+        /// (AstraPlugins #194) says how her work for the player ended: a reason of <see cref="WorkEndReasons"/>
+        /// and a progress count, never for a job the person's own call ended.</summary>
         public static readonly IReadOnlyList<string> EventWords = new[]
         {
             "session_started", "session_ended", "player_hurt", "player_fell", "player_died", "player_revived", "goal_reached",
+            "work_ended",
+        };
+
+        /// <summary>The closed list of <c>work_ended</c> reasons (<c>link-v1.md</c> §5, "<c>work_ended</c>"): a
+        /// GI declares the ones it sends; Astra reads any other as <c>failed</c>.</summary>
+        public static readonly IReadOnlyList<string> WorkEndReasons = new[]
+        {
+            "done", "bag_full", "no_tool", "tool_too_weak", "tool_broken", "nothing_left", "too_far", "stopped", "failed",
         };
 
         public const int MaxMessageBytes = 64 * 1024;

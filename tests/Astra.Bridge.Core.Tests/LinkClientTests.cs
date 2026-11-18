@@ -200,6 +200,24 @@ public class LinkClientTests : IDisposable
     }
 
     [Fact]
+    public async Task Work_ended_is_a_v1_word_with_its_reason_and_progress()
+    {
+        using var c = Client();
+        c.Start();
+        var peer = await Session(c, Welcome("r1", events: "[\"work_ended\"]"));
+        Assert.True(c.Event("work_ended", new LinkData().Set("reason", "done").Set("progress", 20)));
+        var m = await peer.Next();
+        Assert.Equal("event", m["t"]);
+        Assert.Equal("work_ended", m["name"]);
+        var data = (Dictionary<string, object>)m["data"];
+        Assert.Equal("done", data["reason"]);
+        Assert.Equal(20.0, data["progress"]);
+        Assert.Contains("work_ended", LinkClient.EventWords);
+        Assert.Equal(new[] { "done", "bag_full", "no_tool", "tool_too_weak", "tool_broken", "nothing_left", "too_far", "stopped", "failed" },
+            LinkClient.WorkEndReasons);
+    }
+
+    [Fact]
     public async Task Events_go_only_as_granted_v1_words_within_their_rate()
     {
         using var c = Client();
