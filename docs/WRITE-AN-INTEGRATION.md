@@ -334,7 +334,9 @@ astra.Link.OnFrame(() =>
   wrote. Refuse with a `LinkRefusal` code: `not_holding` for a tool that moves or turns her while
   `AstraSdk.Drawn` is false, `not_in_world` in a menu or a loading screen, `busy` in a cutscene or
   a teleport, `player_dead`, `unknown_target`, `bad_args`. A tool that only reads the game does not
-  need her drawn.
+  need her drawn. **The list of codes is closed** (`LinkRefusal.Codes`): `LinkResult.Refuse` throws on
+  any other, and Astra would hand the model any other as `bad_result` anyway, so a refusal never
+  carries your own words.
 - **Events** are the seven v1 words (`session_started`, `session_ended`, `player_hurt`,
   `player_fell`, `player_died`, `player_revived`, `goal_reached`) that your manifest declares. Send
   one at the change, once, never every frame while a state holds: a state is the context, or a
@@ -350,6 +352,26 @@ astra.Link.OnFrame(() =>
 - What you hand `Link` never switches your integration off: a tool that throws answers `failed`, a
   `Link.OnFrame` handler that throws is switched off, and each is said once in the log with its
   stack.
+
+#### Actions in the game (`danger = "game"`)
+
+A tool your manifest declares `danger = "game"` acts in the player's own game when they ask: she
+gathers, fights, picks up, hands over (AstraPlugins `link-v1.md` §5, "Actions in the game"). Astra
+runs it without an approval card, but only in a turn the person started, only while the user switched
+"She may act in the game" on, and only while your game says the player is alone in the world. Your
+part:
+
+- **Say whether the player is alone**, every frame if that is easier: `astra.Link.Alone(hostsTheWorld
+  && nobodyElseIsIn)`. Astra takes the player as not alone at every new session until you say so.
+- **Check before starting**: `astra.Link.Acts` (the switch is on) and your own "alone"; refuse with
+  `LinkRefusal.NotAlone` while the player is not alone.
+- **Answer at once.** Work that takes longer than a call (a walk to the trees) answers `started` and
+  goes on in the game; how it goes is your context, or a later call's result.
+- **Stop all of it** when `astra.Link.StopWork` fires (the switch went off, Astra ended the session,
+  the connection dropped or was closed), and on your own reasons: another player joined, the player
+  died or left the world. A resume does not start it again.
+- **Declare a stop tool**: a `low` tool with `stops = true` that ends all of this work. The catalogue
+  refuses a manifest with `game` tools and no such tool.
 
 ### When your code throws
 
