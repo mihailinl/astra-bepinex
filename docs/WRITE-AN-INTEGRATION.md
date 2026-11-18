@@ -299,6 +299,31 @@ mirrors.
   dark is darker than most (Lethal Company uses `UseLook(floor: 0.10f)`). The engine bounds the floor
   to 0.05–0.40 and the ceiling to 0.8–2.0. Set it only after looking at her in the game.
 
+### An item in her hand: `UseBones` and `HoldItem`
+
+Her picture is drawn by Astra, and an axe, a torch or a cup she holds is drawn by your game, in its
+own scene, so its depth, light and shadows are the game's. The engine tells you where her hand is in
+EACH picture of her (`hello.bones`, flag 256 in [PROTOCOL.md](PROTOCOL.md)), so the item moves with
+her arm and never lags it by a frame.
+
+- `UseBones("rightHand", …)`: the VRM humanoid bones whose pose you want (`"rightHand"`,
+  `"leftHand"`, `"head"`, `"hips"`…, at most 8). Name them where you register: the list is said to
+  Astra when the game connects, and one named later is streamed only from the next connection.
+- `HoldItem(item, "rightHand", gripPosition, gripRotation)` returns a `HeldItem`. Each picture, the
+  foundation puts `item` at the bone's pose in that picture, offset by your grip (a position and a
+  turn in the bone's frame: at rest her bones' axes are her body's own, +Y up, +Z her facing, +X her
+  left), and activates it. While there is no pose (no picture, a 2D character, a bone her body
+  lacks), it deactivates it. `Release()` lets go of it; the GameObject is yours to destroy.
+- Give `HoldItem` a GameObject that is only the item's LOOK: a copy of the game's model with no game
+  script, no collider and no network object, since it is switched on and off at will.
+- `TryBone(name, out position, out rotation)` reads a bone's pose in the main camera's picture, for
+  anything else you place by her.
+- Tune the grip once, on her default character: the pose is relative to her rest pose, so the same
+  numbers hold on other characters.
+- On the Built-in pipeline the item is placed at the main camera's pre-cull, from the very picture
+  drawn into it. On URP and HDRP the picture is taken after the camera renders, so the item shows the
+  pose of the picture taken at the end of the frame before (one frame behind).
+
 ### Astra's AI: `Link`
 
 `Link` is the game's side of Astra Link (AstraPlugins `spec/games/link-v1.md`): tools Astra's AI may

@@ -243,6 +243,98 @@ public class FrameRingTests : IDisposable
         Assert.False(f.HasCaster);
     }
 
+    void Put(long at, ushort v) => BitConverter.GetBytes(v).CopyTo(mem, at);
+
+    /// <summary>Writes one bone entry at <paramref name="e"/>.</summary>
+    void Bone(long e, ushort index, ushort flags, float px, float py, float pz, float x, float y, float z, float w)
+    {
+        Put(e, index);
+        Put(e + 2, flags);
+        Put(e + 4, px);
+        Put(e + 8, py);
+        Put(e + 12, pz);
+        Put(e + 16, x);
+        Put(e + 20, y);
+        Put(e + 24, z);
+        Put(e + 28, w);
+    }
+
+    /// <summary>Her bones (engine #80) are found through the descriptor's +124 offset behind flag 256:
+    /// the section's revision and origin, each entry's index into the hello's list, its valid flag and
+    /// its pose made world (origin + position). An entry flagged valid whose numbers are not finite is
+    /// not valid; a gap in the indices is found as none. A section past its slot, with more than 8
+    /// entries, a wrong magic or without the flag is not handed out.</summary>
+    [Fact]
+    public void her_bones_are_found_behind_flag_256()
+    {
+        int w = 2, h = 2;
+        long data = Header + 1 * Stride;
+        long off = 8L * w * h; // right after the picture
+        long s = data + off;
+        Put(s, 0x454E4F42u);
+        Put(s + 4, 3u);
+        Put(s + 8, 17u);
+        Put(s + 16, 100.5);
+        Put(s + 24, -2.0);
+        Put(s + 32, 7.25);
+        Bone(s + 48, 0, 1, 0.25f, 1.5f, -0.5f, 0f, 0.7071f, 0f, 0.7071f);
+        Bone(s + 80, 2, 0, 9f, 9f, 9f, 0f, 0f, 0f, 1f);           // her body lacks it: flags 0
+        Bone(s + 112, 3, 1, float.NaN, 0f, 0f, 0f, 0f, 0f, 1f);   // "valid", but not a number
+        Put(256 + 128 * 1 + 124, (uint)off);
+        uint flags = FrameRing.FlagLinearDepth | FrameRing.FlagNoPlane3 | FrameRing.FlagBones;
+        Publish(1, counter: 4, host: 4, w: w, h: h, flags: flags);
+        // The ring is opened afresh for each case: Windows refuses to rewrite a file while it is
+        // mapped, so a case is published with no reader holding it.
+        bool HasBonesNow()
+        {
+            using var r = FrameRing.Open(path);
+            long fresh = 0;
+            Assert.True(r.TryLatestOf(0, ref fresh, out var g));
+            return g.HasBones;
+        }
+        using (var ring = FrameRing.Open(path))
+        {
+            long seen = 0;
+            Assert.True(ring.TryLatestOf(0, ref seen, out var f));
+            Assert.True(f.HasBones);
+            Assert.Equal((17u, 3), (f.Bones.Rev, f.Bones.Count));
+            Assert.Equal(new Vec3(100.5, -2, 7.25), f.Bones.Origin);
+            Assert.True(f.Bones.TryFind(0, out var hand));
+            Assert.True(hand.Valid);
+            Assert.Equal(new Vec3(100.75, -0.5, 6.75), hand.Position);
+            Assert.Equal((0f, 0.7071f, 0f, 0.7071f), (hand.X, hand.Y, hand.Z, hand.W));
+            Assert.True(f.Bones.TryFind(2, out var lacked) && !lacked.Valid);
+            Assert.True(f.Bones.TryFind(3, out var nan) && !nan.Valid);
+            Assert.False(f.Bones.TryFind(1, out _), "a name the engine did not know leaves a gap");
+            Assert.Throws<ArgumentOutOfRangeException>(() => f.Bones[3]);
+            Assert.True(ring.StillValid(ref f));
+        }
+
+        Put(s + 4, 9u); // more than 8 entries
+        Publish(1, counter: 5, host: 5, w: w, h: h, flags: flags);
+        Assert.False(HasBonesNow());
+
+        Put(s + 4, 3u);
+        long late = Stride - 48 - 32; // a whole header and ONE entry fit there; the second and third run past the slot
+        Put(data + late, 0x454E4F42u);
+        Put(data + late + 4, 3u);
+        Put(256 + 128 * 1 + 124, (uint)late);
+        Publish(1, counter: 6, host: 6, w: w, h: h, flags: flags);
+        Assert.False(HasBonesNow());
+
+        Put(256 + 128 * 1 + 124, (uint)off);
+        Put(s, 0x54534143u); // another section's magic
+        Publish(1, counter: 7, host: 7, w: w, h: h, flags: flags);
+        Assert.False(HasBonesNow());
+
+        Put(s, 0x454E4F42u);
+        Publish(1, counter: 8, host: 8, w: w, h: h); // no flag 256
+        Assert.False(HasBonesNow());
+
+        Publish(1, counter: 9, host: 9, w: w, h: h, flags: flags); // the control: the same section, whole again
+        Assert.True(HasBonesNow());
+    }
+
     [Theory]
     [InlineData(0, 0x12345678u)] // magic
     [InlineData(4, 2u)] // version

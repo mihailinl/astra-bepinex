@@ -250,6 +250,28 @@ public class JsonAndMessagesTests
         Assert.False(m.ContainsKey("mixed"));
     }
 
+    /// <summary><c>hello.bones</c> (engine #80): the names in order, an empty or repeated one left out
+    /// and none past the 8th (more would refuse the whole hello); none at all = no key. The reply's
+    /// <c>bones</c> and <c>bones_rev</c> read back, absent as null and 0.</summary>
+    [Fact]
+    public void hello_names_at_most_8_distinct_bones_and_the_reply_reads_their_revision()
+    {
+        var many = new List<string> { "rightHand", "", "rightHand", "leftHand", null, "head", "hips", "spine", "chest", "neck", "jaw", "leftFoot", "rightFoot" };
+        Assert.Equal(new List<string> { "rightHand", "leftHand", "head", "hips", "spine", "chest", "neck", "jaw" }, Messages.BonesForHello(many));
+        Assert.Equal(
+            "{\"t\":\"hello\",\"v\":1,\"client\":\"g\",\"bones\":[\"rightHand\",\"head\"]}",
+            Messages.Hello("g", null, null, null, null, null, false, null, null, new[] { "rightHand", "head", "rightHand" }));
+        foreach (var none in new[] { null, new string[0], new[] { "" } })
+            Assert.Equal("{\"t\":\"hello\",\"v\":1,\"client\":\"g\"}", Messages.Hello("g", null, null, null, null, null, false, null, null, none));
+
+        var reply = HelloReply.From(JsonReader.ReadObject("{\"t\":\"hello\",\"v\":1,\"caps\":[\"bones\"],\"bones\":[\"rightHand\"],\"bones_rev\":17}"));
+        Assert.Equal(new List<string> { "rightHand" }, reply.Bones);
+        Assert.Equal(17, reply.BonesRev);
+        var old = HelloReply.From(JsonReader.ReadObject("{\"t\":\"hello\",\"v\":1}"));
+        Assert.Null(old.Bones);
+        Assert.Equal(0, old.BonesRev);
+    }
+
     /// <summary>M4: an engine that never said <c>caps</c> supports everything (today's behaviour); one
     /// that did only supports what it listed.</summary>
     [Fact]

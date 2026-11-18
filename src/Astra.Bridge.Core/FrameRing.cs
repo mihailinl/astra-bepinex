@@ -39,6 +39,77 @@ namespace Astra.Bridge
         public IntPtr Indices;
     }
 
+    /// <summary>The pose of ONE of her bones in a frame (flag 256) — see the protocol's "bones": her
+    /// SOLVED pose of that frame, placed exactly as her picture is.</summary>
+    public struct BonePose
+    {
+        /// <summary>The bone's place in the <c>hello.bones</c> list the section was made for
+        /// (<see cref="Messages.BonesForHello"/>).</summary>
+        public int Index;
+        /// <summary>False: her body has no such bone, or its pose could not be worked out this frame —
+        /// <see cref="Position"/> and the rotation mean nothing (hide the item).</summary>
+        public bool Valid;
+        /// <summary>Where the bone is: the game's world, glTF axes (the section's origin plus the entry's
+        /// position) — convert like her caster.</summary>
+        public Vec3 Position;
+        /// <summary>Its turn FROM HER REST POSE, world glTF axes, as a quaternion x, y, z, w: at rest
+        /// (her T-pose) the bone's axes are her body's own — +Y up, +Z her facing, +X her left.</summary>
+        public float X, Y, Z, W;
+    }
+
+    /// <summary>The BONES section of a frame (flag 256). Read in place: valid only while the frame is
+    /// (see <see cref="FrameRing.StillValid"/>).</summary>
+    public unsafe struct BonesView
+    {
+        /// <summary>The revision of the <c>hello.bones</c> list its indices index: use the section only
+        /// when it equals the hello reply's <see cref="HelloReply.BonesRev"/>.</summary>
+        public uint Rev;
+        /// <summary>How many entries (at most <see cref="Messages.MaxBones"/>).</summary>
+        public int Count;
+        /// <summary>Her placement point (the caster's): every entry's position is relative to it.</summary>
+        public Vec3 Origin;
+        internal byte* Entries;
+
+        /// <summary>Entry <paramref name="i"/> (0..<see cref="Count"/>−1). An entry whose numbers are not
+        /// finite is never valid, whatever its flag says.</summary>
+        public BonePose this[int i]
+        {
+            get
+            {
+                if (i < 0 || i >= Count) throw new ArgumentOutOfRangeException(nameof(i));
+                byte* e = Entries + FrameRing.BoneEntry * i;
+                float px = *(float*)(e + 4), py = *(float*)(e + 8), pz = *(float*)(e + 12);
+                float x = *(float*)(e + 16), y = *(float*)(e + 20), z = *(float*)(e + 24), w = *(float*)(e + 28);
+                bool finite = Finite(px) && Finite(py) && Finite(pz) && Finite(x) && Finite(y) && Finite(z) && Finite(w);
+                return new BonePose
+                {
+                    Index = *(ushort*)e,
+                    Valid = finite && (*(ushort*)(e + 2) & FrameRing.BoneValid) != 0,
+                    Position = new Vec3(Origin.X + px, Origin.Y + py, Origin.Z + pz),
+                    X = x,
+                    Y = y,
+                    Z = z,
+                    W = w,
+                };
+            }
+        }
+
+        /// <summary>The entry of the bone at <paramref name="index"/> in the hello's list, if the section
+        /// carries one (a name the engine did not know leaves a gap).</summary>
+        public bool TryFind(int index, out BonePose pose)
+        {
+            for (int i = 0; i < Count; i++)
+            {
+                pose = this[i];
+                if (pose.Index == index) return true;
+            }
+            pose = default;
+            return false;
+        }
+
+        static bool Finite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
+    }
+
     /// <summary>One published frame, read in place from the ring.</summary>
     public struct RingFrame
     {
@@ -80,6 +151,11 @@ namespace Astra.Bridge
         /// outside it she is transparent.</summary>
         public bool Cropped;
         public int CropX, CropY, CropW, CropH;
+        /// <summary>The slot carries the pose of the bones the game's <c>hello.bones</c> named, in the
+        /// pose of THIS frame's picture (flag 256). False: none asked, no body to pose (a 2D character),
+        /// or no room in the slot — hide the item.</summary>
+        public bool HasBones;
+        public BonesView Bones;
     }
 
     /// <summary>
@@ -92,11 +168,15 @@ namespace Astra.Bridge
     public sealed unsafe class FrameRing : IDisposable
     {
         public const uint Magic = 0x5450434D; // 'M','C','P','T'
-        public const uint FlagDepthNdc = 1, FlagBottomUp = 2, FlagReversedZ = 4, FlagLinearDepth = 8, FlagNoPlane3 = 16, FlagSunView = 32, FlagCaster = 64, FlagCrop = 128;
+        public const uint FlagDepthNdc = 1, FlagBottomUp = 2, FlagReversedZ = 4, FlagLinearDepth = 8, FlagNoPlane3 = 16, FlagSunView = 32, FlagCaster = 64, FlagCrop = 128, FlagBones = 256;
         const uint SunMagic = 0x564E5553; // 'S','U','N','V'
         const int SunHeader = 128;
         const uint CasterMagic = 0x54534143; // 'C','A','S','T'
         const int CasterHeader = 64;
+        const uint BonesMagic = 0x454E4F42; // 'B','O','N','E'
+        const int BonesHeader = 48;
+        internal const int BoneEntry = 32;
+        internal const ushort BoneValid = 1;
         const int DescBase = 256, DescStride = 128;
 
         readonly RingMapping map;
@@ -257,6 +337,26 @@ namespace Astra.Bridge
                         Positions = (IntPtr)(c + CasterHeader),
                         Normals = (IntPtr)(c + CasterHeader + 12L * v),
                         Indices = (IntPtr)(c + CasterHeader + 24L * v),
+                    };
+                }
+            }
+
+            // Her bones (flag 256): the descriptor's +124 offset, behind the caster. Every entry inside
+            // the slot, or the section is not handed out.
+            long bonesAt = *(uint*)(d + 124);
+            if ((f.Flags & FlagBones) != 0 && bonesAt > 0 && bonesAt % 8 == 0 && bonesAt + BonesHeader <= stride)
+            {
+                byte* p = data + bonesAt;
+                uint n = *(uint*)(p + 4);
+                if (*(uint*)p == BonesMagic && n <= Messages.MaxBones && bonesAt + BonesHeader + (long)BoneEntry * n <= stride)
+                {
+                    f.HasBones = true;
+                    f.Bones = new BonesView
+                    {
+                        Rev = *(uint*)(p + 8),
+                        Count = (int)n,
+                        Origin = new Vec3(*(double*)(p + 16), *(double*)(p + 24), *(double*)(p + 32)),
+                        Entries = p + BonesHeader,
                     };
                 }
             }
