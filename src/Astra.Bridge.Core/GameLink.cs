@@ -35,7 +35,11 @@ namespace Astra.Bridge
     /// <para><b>What Astra is told is facts</b>: enums, numbers and booleans under the schemas the
     /// integration declared (<c>[integration.link]</c> in its manifest) — never text a player wrote.
     /// A tool answers with what its declared result schema names, and nothing else reaches the
-    /// model.</para>
+    /// model. A refusal is a code of the closed list (<see cref="LinkRefusal.Codes"/>).</para>
+    /// <para><b>Actions in the game</b> (<c>danger = "game"</c> tools: she gathers, fights, hands
+    /// over): say whether the player is alone with <see cref="Alone"/>, refuse such a call with
+    /// <see cref="LinkRefusal.NotAlone"/> while they are not, and stop all such work when
+    /// <see cref="StopWork"/> fires. Its <c>stops = true</c> tool ends the same work.</para>
     /// </summary>
     public sealed class GameLink
     {
@@ -44,7 +48,8 @@ namespace Astra.Bridge
         readonly HashSet<string> warned = new HashSet<string>();
         LinkClient client;
         LinkData context;
-        bool quiet;
+        bool quiet, alone;
+        bool actsWere;
 
         /// <summary>For the foundation: where a misuse or a failure is said once (the plugin's log).</summary>
         internal Action<string> Warn;
@@ -137,6 +142,39 @@ namespace Astra.Bridge
             client?.Quiet(on);
         }
 
+        /// <summary>Whether the player is alone in the world (the game hosts it, no other player is in it),
+        /// for the <c>danger = "game"</c> tools: Astra offers them only while the game last said so, and
+        /// takes the player as not alone at every new session until told. Say it every frame if that is
+        /// easier: only a change is sent. Kept for a session that starts later.</summary>
+        public void Alone(bool isAlone)
+        {
+            alone = isAlone;
+            client?.Alone(isAlone);
+        }
+
+        /// <summary>"She may act in the game" is granted on a live session: the <c>danger = "game"</c> tools
+        /// may run. Check it, with the player being alone, before starting such work: a true answer is
+        /// remembered, so <see cref="StopWork"/> fires when it stops being true even within the frame.</summary>
+        public bool Acts
+        {
+            get
+            {
+                bool a = client != null && client.Live && client.Grants.Acts;
+                if (a) actsWere = true;
+                return a;
+            }
+        }
+
+        /// <summary>
+        /// Stop all of her <c>danger = "game"</c> work NOW (<c>link-v1.md</c> §5, "Work never outlives its
+        /// permission"): raised on the main thread, once, when <see cref="Acts"/> stops being true — the
+        /// user switched "She may act in the game" off (<c>acts_off</c>), Astra ended the session
+        /// (<c>ended</c>), the connection dropped (<c>dropped</c>; a resume does not start the work again),
+        /// or the connection was closed (<c>closed</c>). The game's own reasons (another player joined, the
+        /// player died or left the world) are the integration's to act on.
+        /// </summary>
+        public event Action<string> StopWork;
+
         /// <summary>A session is live: Astra took this game's hello and nothing has ended it since.</summary>
         public bool Live => client != null && client.Live;
 
@@ -173,6 +211,7 @@ namespace Astra.Bridge
             c.Ended += OnEnded;
             if (context != null) c.Context(context);
             c.Quiet(quiet);
+            c.Alone(alone);
             c.Start();
             if (c.Live) OnGrants(c.Grants);
         }
@@ -190,7 +229,10 @@ namespace Astra.Bridge
             c.GrantsChanged -= OnGrants;
             c.Ended -= OnEnded;
             c.ClearTools();
+            actsWere = false; // its work, if any, belonged to the integration being replaced
+            // Not alone until the new one says so itself: a stale "alone" must never keep game tools on.
             next.Attach(c);
+            next.actsWere = next.Acts;
         }
 
         /// <summary>Once a frame on the main thread: the calls that arrived run, the events are raised, then
@@ -200,6 +242,7 @@ namespace Astra.Bridge
             var c = client;
             if (c == null) return;
             c.Pump();
+            CheckActs(c.Over ? "ended" : null);
             if (c.Over || !ReferenceEquals(c, client)) return;
             for (int i = 0; i < frameHandlers.Count; i++)
             {
@@ -226,6 +269,21 @@ namespace Astra.Bridge
             c.GrantsChanged -= OnGrants;
             c.Ended -= OnEnded;
             c.Dispose();
+            CheckActs("closed");
+        }
+
+        /// <summary>Raise <see cref="StopWork"/> when <see cref="Acts"/> went from true to false since the last
+        /// look, with why: <paramref name="known"/> when the caller knows, else from what changed.</summary>
+        void CheckActs(string known)
+        {
+            bool now = Acts;
+            if (actsWere && !now)
+            {
+                var c = client;
+                string why = known ?? (c != null && c.Live ? "acts_off" : "dropped");
+                Raise(StopWork, why, nameof(StopWork));
+            }
+            actsWere = now;
         }
 
         Func<LinkArgs, LinkResult> Guard(string name, Func<LinkArgs, LinkResult> handler) => args =>

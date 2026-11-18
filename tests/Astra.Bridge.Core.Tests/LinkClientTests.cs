@@ -59,9 +59,9 @@ public class LinkClientTests : IDisposable
     internal static string B(bool b) => b ? "true" : "false";
 
     internal static string Welcome(string resume, string tools = "[]", string events = "[]", bool context = false, bool speaks = false,
-        bool talk = false, string triggers = "[]") =>
+        bool talk = false, string triggers = "[]", bool acts = false) =>
         "{\"t\":\"welcome\",\"granted\":{\"tools\":" + tools + ",\"triggers\":" + triggers + ",\"events\":" + events +
-        ",\"context\":" + B(context) + ",\"skill\":false,\"speaks\":" + B(speaks) + ",\"talk\":" + B(talk) + "}," +
+        ",\"context\":" + B(context) + ",\"skill\":false,\"speaks\":" + B(speaks) + ",\"talk\":" + B(talk) + ",\"acts\":" + B(acts) + "}," +
         "\"limits\":{\"max_message_bytes\":65536,\"max_messages_per_second\":50},\"resume\":\"" + resume + "\",\"unknown_field\":1}";
 
     /// <summary>The thread the last <see cref="PumpUntil"/> pumped on (an async test moves between pool

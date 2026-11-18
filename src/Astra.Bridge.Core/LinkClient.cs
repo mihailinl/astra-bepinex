@@ -22,16 +22,18 @@ namespace Astra.Bridge
     /// <para><b>Threads.</b> A background thread owns the socket's receive side, a second one pings and
     /// notices silence. The game's main thread calls <see cref="Pump"/> once a frame: tool calls run
     /// there, and the events it raises (<see cref="GrantsChanged"/>, <see cref="Ended"/>) are raised
-    /// there. <see cref="Event"/>, <see cref="Context"/>, <see cref="Trigger"/>, <see cref="Talk"/> and
-    /// <see cref="Quiet"/> may be called from any thread. Nothing thrown escapes either background thread
+    /// there. <see cref="Event"/>, <see cref="Context"/>, <see cref="Trigger"/>, <see cref="Talk"/>,
+    /// <see cref="Quiet"/> and <see cref="Alone"/> may be called from any thread. Nothing thrown escapes either background thread
     /// (an uncaught exception there ends an IL2CPP game).</para>
     /// <para><b>Limits</b> are kept here a little under the daemon's, so a message that left on time and
     /// arrived late still counts as on time: under 50 messages a second; events under 2 a second in
     /// bursts of 5, each at most 4 KiB; the context every 1.25 s at most (the newest value wins), at
     /// most 2 KiB; <c>talk</c> every 2.2 s; <c>quiet</c> under twice a second (the newest wins); triggers
     /// 5 a second, so they never crowd out results; a result at most 16 KiB, sent within 10 seconds of its
-    /// call or refused <c>busy</c>. When the daemon still answers <c>rate_limited</c>, the context and
-    /// <c>quiet</c> are said again, since they are states and a dropped one would stand wrong.</para>
+    /// call or refused <c>busy</c>; <c>world{alone:true}</c> once a second at most, while
+    /// <c>world{alone:false}</c> never waits. When the daemon still answers <c>rate_limited</c>, the
+    /// context, <c>quiet</c> and <c>world</c> are said again, since they are states and a dropped one
+    /// would stand wrong.</para>
     /// </summary>
     public sealed class LinkClient : IDisposable
     {
@@ -96,11 +98,12 @@ namespace Astra.Bridge
         // two threads never put the context or quiet on the wire in the wrong order.
         readonly object rateLock = new object(), flushLock = new object();
         readonly Bucket overall = new Bucket(10, 38), events = new Bucket(5, 1.8), context = new Bucket(1, 0.8),
-            talk = new Bucket(1, 0.45), quiet = new Bucket(1, 1.8), triggers = new Bucket(5, 5);
+            talk = new Bucket(1, 0.45), quiet = new Bucket(1, 1.8), triggers = new Bucket(5, 5), world = new Bucket(1, 0.9);
         int maxMessageBytes = MaxMessageBytes;
         LinkData lastContext;
         bool contextDue;
         bool quietOn, quietDue, quietSaid;
+        bool aloneOn, aloneDue, aloneSaid;
 
         enum InKind { Call, Welcome, Grants, Ended }
 
@@ -310,6 +313,22 @@ namespace Astra.Bridge
             FlushQuiet();
         }
 
+        /// <summary>Whether the player is alone in the world (<paramref name="alone"/>: the game hosts it and
+        /// no other player is in it), for the <c>danger = "game"</c> tools (<c>link-v1.md</c> §5, "Actions in
+        /// the game"). Sent when it changes, while "She may act in the game" is granted, and again at every
+        /// new session (Astra takes the player as not alone until told). <c>alone:true</c> waits for its
+        /// rate (once a second); <c>alone:false</c>, which takes those tools away, never waits.</summary>
+        public void Alone(bool alone)
+        {
+            lock (rateLock)
+            {
+                if (aloneOn == alone && !aloneDue) return;
+                aloneOn = alone;
+                aloneDue = true;
+            }
+            FlushWorld();
+        }
+
         /// <summary>
         /// Call once a frame on the game's main thread: runs the tool calls that arrived, raises
         /// <see cref="GrantsChanged"/> and <see cref="Ended"/>, and sends a context or quiet that was
@@ -339,17 +358,20 @@ namespace Astra.Bridge
             }
             FlushContext();
             FlushQuiet();
+            FlushWorld();
         }
 
-        /// <summary>Say the context and quiet again: for a new session (which takes quiet as off until
-        /// told), or after the daemon <paramref name="refused"/> a message for its rate (then quiet is said
-        /// again whichever way it stands, once it was said at all: a dropped "off" would keep her silent).</summary>
+        /// <summary>Say the context, quiet and world again: for a new session (which takes quiet as off and
+        /// the player as not alone until told), or after the daemon <paramref name="refused"/> a message for
+        /// its rate (then quiet and world are said again whichever way they stand, once said at all: a
+        /// dropped "off" would keep her silent, a dropped "not alone" would leave the game tools on).</summary>
         void SayStatesAgain(bool refused)
         {
             lock (rateLock)
             {
                 if (lastContext != null) contextDue = true;
                 quietDue = quietDue || quietOn || (refused && quietSaid);
+                aloneDue = aloneDue || aloneOn || (refused && aloneSaid);
             }
         }
 
@@ -382,9 +404,16 @@ namespace Astra.Bridge
         }
 
         /// <summary>A result is always sent (the daemon waits for it): it counts against the overall rate
-        /// but is never dropped for it — what the game itself sends has its own rates, which leave room.</summary>
+        /// but is never dropped for it — what the game itself sends has its own rates, which leave room.
+        /// A refusal carries a code of the closed list or nothing: one that is not listed (no
+        /// <see cref="LinkResult"/> can hold one, so this is a second line) goes as <c>failed</c>.</summary>
         void Reply(string id, LinkResult r)
         {
+            if (!r.Ok && !LinkRefusal.IsListed(r.Error))
+            {
+                SayOnce("unlisted:" + r.Error, $"a refusal code '{r.Error}' is not on Link's closed list: sent as failed");
+                r = LinkResult.Refuse(LinkRefusal.Failed);
+            }
             string json = Result(id, r);
             int cap;
             lock (rateLock) cap = Math.Min(MaxResultBytes, maxMessageBytes);
@@ -430,6 +459,32 @@ namespace Astra.Bridge
                 }
                 if (!SendTaken(json))
                     lock (rateLock) quietDue = true;
+            }
+        }
+
+        void FlushWorld()
+        {
+            lock (flushLock)
+            {
+                string json;
+                lock (rateLock)
+                {
+                    if (!aloneDue || !live || !grants.Acts) return;
+                    if (aloneOn)
+                    {
+                        if (!TakeBoth(world)) return;
+                    }
+                    else
+                    {
+                        // "Not alone" takes the game tools away: it never waits for a rate (link-v1.md §4).
+                        overall.Force(clock());
+                    }
+                    json = aloneOn ? "{\"t\":\"world\",\"alone\":true}" : "{\"t\":\"world\",\"alone\":false}";
+                    aloneDue = false;
+                    aloneSaid = true;
+                }
+                if (!SendTaken(json))
+                    lock (rateLock) aloneDue = true;
             }
         }
 
@@ -648,7 +703,7 @@ namespace Astra.Bridge
                 {
                     string code = m.TryGetValue("code", out var c) ? c as string : null;
                     SayOnce("conn:error:" + code, $"Astra Link: Astra refused a message ({code ?? "no code"})");
-                    if (code == "rate_limited") SayStatesAgain(refused: true); // a dropped context or quiet would stand wrong
+                    if (code == "rate_limited") SayStatesAgain(refused: true); // a dropped context, quiet or world would stand wrong
                     if (code == "not_granted" && !live)
                     {
                         // Its hello refused: a token it will never take again (spent, or no Link for this

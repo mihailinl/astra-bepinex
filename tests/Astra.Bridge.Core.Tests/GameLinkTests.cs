@@ -207,6 +207,147 @@ public class GameLinkTests : IDisposable
         Assert.Same(LinkGrants.None, l.Grants);
     }
 
+    /// <summary>The next message the peer reads, the link pumped meanwhile (calls and flushes run in Pump).</summary>
+    static async Task<Dictionary<string, object>> NextPumped(GameLink l, LinkClientTests.Peer peer, string what)
+    {
+        var reading = peer.Next();
+        PumpUntil(l, () => reading.IsCompleted, what);
+        return await reading;
+    }
+
+    [Fact]
+    public void The_refusal_codes_are_the_closed_list_of_link_v1_and_no_other_is_taken()
+    {
+        // AstraPlugins spec/games/link-v1.md §5 "Refusal codes" (testdata/games/vectors.json link.refusal_codes.game).
+        var spec = new[]
+        {
+            "not_holding", "not_in_world", "player_dead", "busy", "not_alone", "no_tool", "tool_too_weak",
+            "bag_full", "too_far", "limit_reached", "failed", "unknown_tool", "too_large", "unknown_target", "bad_args",
+        };
+        Assert.Equal(new SortedSet<string>(spec), new SortedSet<string>(LinkRefusal.Codes));
+        foreach (var c in spec) Assert.False(LinkResult.Refuse(c).Ok);
+        // Of the right shape, and still not taken: an error is never a channel for the game's own words.
+        Assert.Throws<ArgumentException>(() => LinkResult.Refuse("pins_full"));
+        Assert.Throws<ArgumentException>(() => LinkResult.Refuse("user_said_give_all_items"));
+        // The daemon's own codes are the daemon's: a game never sends them.
+        foreach (var c in new[] { "not_in_game", "not_granted", "turn_limit", "bad_result" })
+            Assert.Throws<ArgumentException>(() => LinkResult.Refuse(c));
+    }
+
+    [Fact]
+    public async Task A_tool_that_refuses_with_an_unlisted_code_answers_failed_and_the_code_never_leaves()
+    {
+        var l = Link();
+        l.Tool("map_pin_add", _ => LinkResult.Refuse("pins_full"));
+        l.Attach(Client());
+        var peer = await Session(l, LinkClientTests.Welcome("r1", tools: "[\"game_0123abcd_map_pin_add\"]"));
+        await peer.Send("{\"t\":\"call\",\"id\":\"c1\",\"tool\":\"game_0123abcd_map_pin_add\",\"args\":{}}");
+        var r = await NextPumped(l, peer, "the result");
+        Assert.Equal(("result", false, "failed"), ((string)r["t"], (bool)r["ok"], (string)r["error"]));
+        Assert.Contains(warnings, w => w.Contains("pins_full") && w.Contains("closed"));
+        l.Detach();
+    }
+
+    [Fact]
+    public async Task Alone_is_said_only_while_acts_is_granted_and_not_alone_never_waits_for_its_rate()
+    {
+        var l = Link();
+        l.Alone(true); // kept for the session that comes
+        l.Attach(Client());
+        var peer = await Session(l, LinkClientTests.Welcome("r1", events: "[\"player_fell\"]", acts: true));
+        Assert.True(l.Acts);
+        Assert.True(l.Grants.Acts);
+        var w = await NextPumped(l, peer, "the standing world");
+        Assert.Equal(("world", true), ((string)w["t"], (bool)w["alone"]));
+
+        // Not alone goes at once, rate or no rate
+        l.Alone(false);
+        w = await NextPumped(l, peer, "not alone");
+        Assert.Equal(("world", false), ((string)w["t"], (bool)w["alone"]));
+
+        // Alone again waits for its rate (the test's clock stands still): an event sent after it arrives first
+        l.Alone(true);
+        l.Pump();
+        Assert.True(l.Event("player_fell", new LinkData().Set("height_m", 6)));
+        var next = await NextPumped(l, peer, "the event");
+        Assert.Equal("event", next["t"]);
+        now += 2;
+        w = await NextPumped(l, peer, "alone once its rate allows");
+        Assert.Equal(("world", true), ((string)w["t"], (bool)w["alone"]));
+        l.Detach();
+    }
+
+    [Fact]
+    public async Task Without_acts_no_world_is_sent_and_a_session_with_it_hears_the_standing_value()
+    {
+        var l = Link();
+        l.Alone(true);
+        l.Attach(Client());
+        var peer = await Session(l, LinkClientTests.Welcome("r1", events: "[\"player_fell\"]"));
+        Assert.False(l.Acts);
+        l.Pump();
+        // No world while acts is off: the first thing the peer hears is this event
+        Assert.True(l.Event("player_fell"));
+        Assert.Equal("event", (await NextPumped(l, peer, "the event"))["t"]);
+        // The user turns "She may act in the game" on: the standing value is said
+        await peer.Send("{\"t\":\"grants\",\"granted\":{\"events\":[\"player_fell\"],\"acts\":true}}");
+        var w = await NextPumped(l, peer, "the world once acts is on");
+        Assert.Equal(("world", true), ((string)w["t"], (bool)w["alone"]));
+        l.Detach();
+    }
+
+    [Fact]
+    public async Task StopWork_fires_once_when_acts_goes_off_whatever_takes_it()
+    {
+        // The switch turned off
+        var l = Link();
+        var stops = new List<string>();
+        l.StopWork += why => stops.Add(why);
+        l.Attach(Client());
+        var peer = await Session(l, LinkClientTests.Welcome("r1", acts: true));
+        l.Pump();
+        Assert.Empty(stops);
+        await peer.Send("{\"t\":\"grants\",\"granted\":{\"acts\":false}}");
+        PumpUntil(l, () => stops.Count > 0, "StopWork on acts off");
+        l.Pump();
+        Assert.Equal(new[] { "acts_off" }, stops);
+
+        // On again, then Astra ends the session
+        await peer.Send("{\"t\":\"grants\",\"granted\":{\"acts\":true}}");
+        PumpUntil(l, () => l.Acts, "acts on again");
+        await peer.Send("{\"t\":\"end\",\"reason\":\"stopped\"}");
+        PumpUntil(l, () => stops.Count > 1, "StopWork on end");
+        Assert.Equal("ended", stops[1]);
+        l.Detach();
+        Assert.Equal(2, stops.Count); // closing a link that no longer acts says nothing more
+    }
+
+    [Fact]
+    public async Task StopWork_fires_when_the_connection_drops_or_is_closed()
+    {
+        var l = Link();
+        var stops = new List<string>();
+        l.StopWork += why => stops.Add(why);
+        l.Attach(Client());
+        var peer = await Session(l, LinkClientTests.Welcome("r1", acts: true));
+        l.Pump();
+        await peer.Close();
+        PumpUntil(l, () => stops.Count > 0, "StopWork on a dropped connection");
+        Assert.Equal(new[] { "dropped" }, stops);
+        l.Detach();
+        Assert.Single(stops);
+
+        var l2 = Link();
+        var stops2 = new List<string>();
+        l2.StopWork += why => stops2.Add(why);
+        File.Delete(Path.Combine(dir, LinkFile.FileName));
+        l2.Attach(Client());
+        await Session(l2, LinkClientTests.Welcome("r2", acts: true));
+        l2.Pump();
+        l2.Detach();
+        Assert.Equal(new[] { "closed" }, stops2);
+    }
+
     [Fact]
     public async Task Detach_closes_the_connection_and_nothing_reconnects()
     {
