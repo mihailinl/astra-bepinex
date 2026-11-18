@@ -50,6 +50,7 @@ namespace Astra.Bridge
         LinkData context;
         bool quiet, alone;
         bool actsWere;
+        int lossesSeen;
 
         /// <summary>For the foundation: where a misuse or a failure is said once (the plugin's log).</summary>
         internal Action<string> Warn;
@@ -170,7 +171,8 @@ namespace Astra.Bridge
         /// permission"): raised on the main thread, once, when <see cref="Acts"/> stops being true — the
         /// user switched "She may act in the game" off (<c>acts_off</c>), Astra ended the session
         /// (<c>ended</c>), the connection dropped (<c>dropped</c>; a resume does not start the work again),
-        /// or the connection was closed (<c>closed</c>). The game's own reasons (another player joined, the
+        /// Link stopped for good with no new token (<c>stopped</c>), or the connection was closed
+        /// (<c>closed</c>). Switched off and on again between two frames, it still fires. The game's own reasons (another player joined, the
         /// player died or left the world) are the integration's to act on.
         /// </summary>
         public event Action<string> StopWork;
@@ -209,6 +211,7 @@ namespace Astra.Bridge
             foreach (var t in tools) c.Tool(t.Key, t.Value);
             c.GrantsChanged += OnGrants;
             c.Ended += OnEnded;
+            lossesSeen = c.ActsLosses;
             if (context != null) c.Context(context);
             c.Quiet(quiet);
             c.Alone(alone);
@@ -232,7 +235,7 @@ namespace Astra.Bridge
             actsWere = false; // its work, if any, belonged to the integration being replaced
             // Not alone until the new one says so itself: a stale "alone" must never keep game tools on.
             next.Attach(c);
-            next.actsWere = next.Acts;
+            next.actsWere = c.Live && c.Grants.Acts;
         }
 
         /// <summary>Once a frame on the main thread: the calls that arrived run, the events are raised, then
@@ -242,7 +245,7 @@ namespace Astra.Bridge
             var c = client;
             if (c == null) return;
             c.Pump();
-            CheckActs(c.Over ? "ended" : null);
+            CheckActs(c);
             if (c.Over || !ReferenceEquals(c, client)) return;
             for (int i = 0; i < frameHandlers.Count; i++)
             {
@@ -269,20 +272,20 @@ namespace Astra.Bridge
             c.GrantsChanged -= OnGrants;
             c.Ended -= OnEnded;
             c.Dispose();
-            CheckActs("closed");
+            CheckActs(c);
         }
 
-        /// <summary>Raise <see cref="StopWork"/> when <see cref="Acts"/> went from true to false since the last
-        /// look, with why: <paramref name="known"/> when the caller knows, else from what changed.</summary>
-        void CheckActs(string known)
+        /// <summary>Raise <see cref="StopWork"/> once when acts stopped holding since the last look — by the
+        /// client's count of losses, so an off-and-on again (a switch flipped twice, a drop and a resume)
+        /// between two frames is not missed — and only when work may have started (a true <see cref="Acts"/>
+        /// was seen since).</summary>
+        void CheckActs(LinkClient c)
         {
-            bool now = Acts;
-            if (actsWere && !now)
-            {
-                var c = client;
-                string why = known ?? (c != null && c.Live ? "acts_off" : "dropped");
-                Raise(StopWork, why, nameof(StopWork));
-            }
+            int losses = c.ActsLosses;
+            bool lost = losses != lossesSeen;
+            lossesSeen = losses;
+            bool now = ReferenceEquals(c, client) && c.Live && c.Grants.Acts;
+            if (actsWere && (lost || !now)) Raise(StopWork, c.ActsLossWhy ?? "dropped", nameof(StopWork));
             actsWere = now;
         }
 

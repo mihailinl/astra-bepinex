@@ -104,12 +104,20 @@ namespace Astra.Bridge
         bool contextDue;
         bool quietOn, quietDue, quietSaid;
         bool aloneOn, aloneDue, aloneSaid;
+        bool aloneHeard; // what this session's Astra last heard: it takes "not alone" at every welcome
+
+        // Every time "She may act in the game" stopped holding (a grants without acts, the session
+        // ending, dropping or being stopped), counted on the thread that saw it, with why: GameLink
+        // compares the count, so an off-and-on again between two frames is never missed.
+        int actsLosses;
+        volatile string actsLossWhy;
 
         enum InKind { Call, Welcome, Grants, Ended }
 
         struct Inbound
         {
             public InKind Kind;
+            public LinkGrants Granted; // a Welcome's or Grants' own set, raised as it arrived
             public int Session;
             public string Id, Tool, Text;
             public LinkArgs Args;
@@ -199,6 +207,26 @@ namespace Astra.Bridge
 
         /// <summary>Bumped on every new session.</summary>
         public int Session => Volatile.Read(ref session);
+
+        /// <summary>How many times "She may act in the game" stopped holding since this client was made
+        /// (a grants without acts, the session ending, dropping or stopping), and why the last time
+        /// (<c>acts_off</c>, <c>ended</c>, <c>dropped</c>, <c>stopped</c>).</summary>
+        public int ActsLosses => Volatile.Read(ref actsLosses);
+
+        /// <inheritdoc cref="ActsLosses"/>
+        public string ActsLossWhy => actsLossWhy;
+
+        /// <summary>The session stops being live: when acts was granted, that is a loss of it, said
+        /// before <c>live</c> falls so a reader who sees the session gone also sees the count.</summary>
+        void EndLive(string why)
+        {
+            if (live && grants.Acts)
+            {
+                actsLossWhy = why;
+                Interlocked.Increment(ref actsLosses);
+            }
+            live = false;
+        }
 
         /// <summary>Tool calls that arrived and wait for <see cref="Pump"/>.</summary>
         public int PendingCalls => Volatile.Read(ref pendingCalls);
@@ -349,7 +377,7 @@ namespace Astra.Bridge
                         // A new session knows nothing yet, and a switch turned on again knows nothing either:
                         // say the context and a standing quiet again.
                         SayStatesAgain(refused: false);
-                        Raise(GrantsChanged, grants, "GrantsChanged");
+                        Raise(GrantsChanged, m.Granted ?? grants, "GrantsChanged");
                         break;
                     case InKind.Ended:
                         Raise(Ended, m.Text, "Ended");
@@ -405,15 +433,10 @@ namespace Astra.Bridge
 
         /// <summary>A result is always sent (the daemon waits for it): it counts against the overall rate
         /// but is never dropped for it — what the game itself sends has its own rates, which leave room.
-        /// A refusal carries a code of the closed list or nothing: one that is not listed (no
-        /// <see cref="LinkResult"/> can hold one, so this is a second line) goes as <c>failed</c>.</summary>
+        /// A refusal's code is always on the closed list: <see cref="LinkResult.Refuse"/> is the only way to
+        /// make one, and it takes no other.</summary>
         void Reply(string id, LinkResult r)
         {
-            if (!r.Ok && !LinkRefusal.IsListed(r.Error))
-            {
-                SayOnce("unlisted:" + r.Error, $"a refusal code '{r.Error}' is not on Link's closed list: sent as failed");
-                r = LinkResult.Refuse(LinkRefusal.Failed);
-            }
             string json = Result(id, r);
             int cap;
             lock (rateLock) cap = Math.Min(MaxResultBytes, maxMessageBytes);
@@ -476,12 +499,20 @@ namespace Astra.Bridge
                     }
                     else
                     {
+                        if (!aloneHeard)
+                        {
+                            // Astra already takes the player as not alone (a fresh session, or an "alone"
+                            // still waiting for its rate): nothing to say, and nothing to flood with.
+                            aloneDue = false;
+                            return;
+                        }
                         // "Not alone" takes the game tools away: it never waits for a rate (link-v1.md §4).
                         overall.Force(clock());
                     }
                     json = aloneOn ? "{\"t\":\"world\",\"alone\":true}" : "{\"t\":\"world\",\"alone\":false}";
                     aloneDue = false;
                     aloneSaid = true;
+                    aloneHeard = aloneOn;
                 }
                 if (!SendTaken(json))
                     lock (rateLock) aloneDue = true;
@@ -530,7 +561,7 @@ namespace Astra.Bridge
         /// still the current one: a newer session must not be marked dead for an old socket's failure.</summary>
         void Drop(WebSocketClient socket)
         {
-            if (ws == socket) live = false;
+            if (ws == socket) EndLive("dropped");
             socket.Dispose();
         }
 
@@ -610,7 +641,7 @@ namespace Astra.Bridge
                     {
                         if (ws == socket)
                         {
-                            live = false;
+                            EndLive("dropped");
                             ws = null;
                         }
                         socket.Dispose();
@@ -665,15 +696,22 @@ namespace Astra.Bridge
                     grants = LinkGrants.From(m.TryGetValue("granted", out var g) ? g : null);
                     AdoptLimits(m.TryGetValue("limits", out var l) ? l as Dictionary<string, object> : null);
                     Interlocked.Increment(ref session);
+                    lock (rateLock) aloneHeard = false; // every welcome, a resume's too: not alone until told
                     live = true;
-                    inbox.Enqueue(new Inbound { Kind = InKind.Welcome });
+                    inbox.Enqueue(new Inbound { Kind = InKind.Welcome, Granted = grants });
                     State($"Astra Link: session live ({grants})");
                     return;
                 }
                 case "grants":
                     if (!live) return;
+                    var was = grants;
                     grants = LinkGrants.From(m.TryGetValue("granted", out var ng) ? ng : null);
-                    inbox.Enqueue(new Inbound { Kind = InKind.Grants });
+                    if (was.Acts && !grants.Acts)
+                    {
+                        actsLossWhy = "acts_off";
+                        Interlocked.Increment(ref actsLosses);
+                    }
+                    inbox.Enqueue(new Inbound { Kind = InKind.Grants, Granted = grants });
                     Log?.Invoke($"Astra Link: granted now {grants}");
                     return;
                 case "call":
@@ -694,7 +732,7 @@ namespace Astra.Bridge
                 {
                     string reason = m.TryGetValue("reason", out var why) ? why as string : null;
                     over = true;
-                    live = false;
+                    EndLive("ended");
                     inbox.Enqueue(new Inbound { Kind = InKind.Ended, Text = reason });
                     Log?.Invoke($"Astra Link: Astra ended the session ({reason ?? "no reason"}); Link is off until the next Play");
                     return;
@@ -703,7 +741,13 @@ namespace Astra.Bridge
                 {
                     string code = m.TryGetValue("code", out var c) ? c as string : null;
                     SayOnce("conn:error:" + code, $"Astra Link: Astra refused a message ({code ?? "no code"})");
-                    if (code == "rate_limited") SayStatesAgain(refused: true); // a dropped context, quiet or world would stand wrong
+                    if (code == "rate_limited")
+                    {
+                        // A dropped context, quiet or world would stand wrong; a dropped "alone" leaves
+                        // Astra taking the player as not alone (it never drops "not alone").
+                        lock (rateLock) aloneHeard = false;
+                        SayStatesAgain(refused: true);
+                    }
                     if (code == "not_granted" && !live)
                     {
                         // Its hello refused: a token it will never take again (spent, or no Link for this
@@ -779,7 +823,7 @@ namespace Astra.Bridge
         void Stop(string line)
         {
             over = true;
-            live = false;
+            EndLive("stopped");
             Log?.Invoke(line);
         }
 
@@ -882,7 +926,7 @@ namespace Astra.Bridge
         {
             stopping.Set();
             over = true;
-            live = false;
+            EndLive("closed");
             ws?.Close(); // unblocks Receive
             thread?.Join(1000);
             keeper?.Join(1000);

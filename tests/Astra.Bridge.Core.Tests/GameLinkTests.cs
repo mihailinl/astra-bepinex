@@ -323,6 +323,126 @@ public class GameLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task StopWork_fires_when_acts_goes_off_and_on_again_between_two_frames()
+    {
+        var l = Link();
+        var stops = new List<string>();
+        l.StopWork += why => stops.Add(why);
+        l.Attach(Client());
+        var peer = await Session(l, LinkClientTests.Welcome("r1", acts: true));
+        l.Pump();
+        Assert.True(l.Acts); // work may start now
+        var c = clients[clients.Count - 1];
+        int losses = c.ActsLosses;
+        // Off and on again before the next frame: the level is true at both looks
+        await peer.Send("{\"t\":\"grants\",\"granted\":{\"acts\":false}}");
+        await peer.Send("{\"t\":\"grants\",\"granted\":{\"acts\":true}}");
+        var deadline = DateTime.UtcNow.AddSeconds(3);
+        while (c.ActsLosses == losses || !c.Grants.Acts)
+        {
+            if (DateTime.UtcNow > deadline) throw new Xunit.Sdk.XunitException("timed out waiting for both grants");
+            Thread.Sleep(5);
+        }
+        var seen = new List<bool>();
+        l.GrantsChanged += g => seen.Add(g.Acts);
+        l.Pump();
+        Assert.Equal(new[] { "acts_off" }, stops);
+        Assert.Equal(new[] { false, true }, seen); // each grants raised as it arrived
+        l.Pump();
+        Assert.Single(stops);
+        l.Detach();
+    }
+
+    [Fact]
+    public async Task After_a_drop_and_a_resume_alone_is_said_again_and_the_work_was_stopped_once()
+    {
+        var l = Link();
+        var stops = new List<string>();
+        l.StopWork += why => stops.Add(why);
+        l.Alone(true);
+        l.Attach(Client());
+        var peer = await Session(l, LinkClientTests.Welcome("r1", acts: true));
+        Assert.True(l.Acts);
+        var w = await NextPumped(l, peer, "the first world");
+        Assert.Equal(true, w["alone"]);
+        await peer.Close();
+        var again = mock.Accept();
+        PumpUntil(l, () => again.IsCompleted, "the resume");
+        var peer2 = await again;
+        var hello = await peer2.Next();
+        Assert.Equal("r1", hello["resume"]);
+        await peer2.Send(LinkClientTests.Welcome("r2", acts: true));
+        now += 2; // a resume comes a second or more later; the test's clock stands still otherwise
+        // Astra takes the player as not alone at every welcome: the game says it again
+        w = await NextPumped(l, peer2, "world after the resume");
+        Assert.Equal(("world", true), ((string)w["t"], (bool)w["alone"]));
+        Assert.Equal(new[] { "dropped" }, stops); // the drop stopped the work; the resume did not restart it
+        l.Detach();
+    }
+
+    [Fact]
+    public async Task A_rate_limited_answer_has_alone_said_again()
+    {
+        var l = Link();
+        l.Alone(true);
+        l.Attach(Client());
+        var peer = await Session(l, LinkClientTests.Welcome("r1", acts: true));
+        Assert.Equal(true, (await NextPumped(l, peer, "the first world"))["alone"]);
+        await peer.Send("{\"t\":\"error\",\"code\":\"rate_limited\"}");
+        now += 2; // its rate allows it again
+        var w = await NextPumped(l, peer, "world said again");
+        Assert.Equal(("world", true), ((string)w["t"], (bool)w["alone"]));
+        l.Detach();
+    }
+
+    [Fact]
+    public async Task Not_alone_is_not_sent_when_Astra_already_takes_the_player_as_not_alone()
+    {
+        var l = Link();
+        l.Attach(Client());
+        var peer = await Session(l, LinkClientTests.Welcome("r1", events: "[\"player_fell\"]", acts: true));
+        l.Alone(false); // a fresh session is not alone already
+        l.Alone(true);
+        Assert.Equal(true, (await NextPumped(l, peer, "alone"))["alone"]);
+        l.Alone(false);
+        Assert.Equal(false, (await NextPumped(l, peer, "not alone"))["alone"]);
+        l.Alone(true);  // waits for its rate (the clock stands still)...
+        l.Alone(false); // ...and is cancelled: Astra still holds "not alone", nothing to say
+        for (int i = 0; i < 5; i++) l.Pump();
+        Assert.True(l.Event("player_fell"));
+        Assert.Equal("event", (await NextPumped(l, peer, "the event"))["t"]);
+        now += 2;
+        for (int i = 0; i < 5; i++) l.Pump();
+        Assert.True(l.Event("player_fell"));
+        Assert.Equal("event", (await NextPumped(l, peer, "the second event"))["t"]); // no world went out
+        l.Detach();
+    }
+
+    [Fact]
+    public async Task A_handover_says_not_alone_and_stops_nothing_on_either_side()
+    {
+        var l1 = Link();
+        var stops = new List<string>();
+        l1.StopWork += why => stops.Add("old:" + why);
+        l1.Alone(true);
+        l1.Attach(Client());
+        var peer = await Session(l1, LinkClientTests.Welcome("r1", acts: true));
+        Assert.True(l1.Acts);
+        Assert.Equal(true, (await NextPumped(l1, peer, "alone"))["alone"]);
+        var l2 = Link();
+        l2.StopWork += why => stops.Add("new:" + why);
+        l1.HandOver(l2);
+        // The new integration has not said it is alone: Astra hears not alone at once
+        var w = await NextPumped(l2, peer, "not alone after the handover");
+        Assert.Equal(("world", false), ((string)w["t"], (bool)w["alone"]));
+        for (int i = 0; i < 5; i++) { l1.Pump(); l2.Pump(); }
+        Assert.Empty(stops);
+        Assert.True(l2.Acts);
+        l2.Detach();
+        Assert.Equal(new[] { "new:closed" }, stops);
+    }
+
+    [Fact]
     public async Task StopWork_fires_when_the_connection_drops_or_is_closed()
     {
         var l = Link();
