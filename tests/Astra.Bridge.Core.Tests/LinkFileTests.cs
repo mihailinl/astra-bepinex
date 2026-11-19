@@ -116,6 +116,32 @@ public class LinkFileTests
     }
 
     [Fact]
+    public void The_profiles_link_folder_is_where_a_game_steam_started_finds_the_file()
+    {
+        // Launcher 0.6.1 and later write <profile>/link/astra-link.json, and a game Steam starts has
+        // no ASTRA_LINK_FILE (the Link stand, 2026-11-19: Valheim found no file and ran without Link).
+        string dir = Path.Combine(Path.GetTempPath(), "astra-linkfile-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, LinkFile.Folder));
+        try
+        {
+            string inFolder = Path.Combine(dir, LinkFile.Folder, LinkFile.FileName);
+            File.WriteAllText(inFolder, File_());
+            Assert.Equal(inFolder, LinkFile.Locate(dir, _ => null));
+            // A file 0.6.0 left at the root loses to the folder's…
+            string atRoot = Path.Combine(dir, LinkFile.FileName);
+            File.WriteAllText(atRoot, File_());
+            Assert.Equal(inFolder, LinkFile.Locate(dir, _ => null));
+            // …and is still read where the folder holds none.
+            File.Delete(inFolder);
+            Assert.Equal(atRoot, LinkFile.Locate(dir, _ => null));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public void Json_values_are_read_whole_and_nesting_is_bounded()
     {
         var v = (Dictionary<string, object>)JsonReader.ReadValue("{\"a\":{\"b\":[1,\"x\",true,null,{\"c\":2}]},\"a2\":[]}");
