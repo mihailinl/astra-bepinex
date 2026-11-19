@@ -8,9 +8,11 @@ namespace Astra.Bridge
 {
     /// <summary>
     /// The Astra Link file (AstraPlugins <c>spec/games/link-v1.md</c> §2): on every Play, Astra's
-    /// launcher writes <c>astra-link.json</c> into the game's profile (and names it in
-    /// <c>ASTRA_LINK_FILE</c> when Astra starts the game itself). It says where the daemon's Link socket
-    /// listens and holds a one-time token.
+    /// launcher writes <c>astra-link.json</c> into the game's profile, in its folder <c>link/</c> since
+    /// launcher 0.6.1 (the folder Flathub's Steam is granted read-only) and at the profile's root before
+    /// (0.6.0), and names it in <c>ASTRA_LINK_FILE</c> when Astra starts the game itself. A game Steam
+    /// starts gets no variable from Astra, so the folder is how it finds the file. It says where the
+    /// daemon's Link socket listens and holds a one-time token.
     /// <para>No file means no Link at all — an older Astra, a game not from the signed catalogue, or a
     /// game started outside Astra — and the integration then runs presentation-only, silently. A file
     /// this reads but does not trust (another host, another integration, expired) is the same.</para>
@@ -19,6 +21,9 @@ namespace Astra.Bridge
     {
         /// <summary>The file's name in the profile (a reserved profile file name).</summary>
         public const string FileName = "astra-link.json";
+
+        /// <summary>The profile's folder the launcher writes <see cref="FileName"/> into (0.6.1 and later).</summary>
+        public const string Folder = "link";
 
         /// <summary>The variable naming the file when Astra starts the game itself (under Proton, in its
         /// <c>Z:\</c> form, which the game opens as it is).</summary>
@@ -58,8 +63,9 @@ namespace Astra.Bridge
 
         /// <summary>
         /// Where the link file is: <see cref="EnvVar"/> when it is set and names a file, else
-        /// <see cref="FileName"/> in <paramref name="profileDir"/> when it exists; null when neither does.
-        /// <paramref name="env"/> reads a variable (the process's own when null).
+        /// <see cref="FileName"/> in the profile's <see cref="Folder"/> (launcher 0.6.1 and later), else at
+        /// the profile's root (0.6.0, which a newer launcher removes on every Play); null when none is
+        /// there. <paramref name="env"/> reads a variable (the process's own when null).
         /// </summary>
         public static string Locate(string profileDir, Func<string, string> env = null)
         {
@@ -69,8 +75,10 @@ namespace Astra.Bridge
                 string named = env(EnvVar);
                 if (!string.IsNullOrEmpty(named) && File.Exists(named)) return named;
                 if (string.IsNullOrEmpty(profileDir)) return null;
-                string inProfile = System.IO.Path.Combine(profileDir, FileName);
-                return File.Exists(inProfile) ? inProfile : null;
+                string inFolder = System.IO.Path.Combine(profileDir, Folder, FileName);
+                if (File.Exists(inFolder)) return inFolder;
+                string atRoot = System.IO.Path.Combine(profileDir, FileName);
+                return File.Exists(atRoot) ? atRoot : null;
             }
             catch (Exception e) when (e is ArgumentException || e is IOException || e is UnauthorizedAccessException || e is NotSupportedException || e is System.Security.SecurityException)
             {
