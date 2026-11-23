@@ -47,6 +47,10 @@ REPO=$(pwd)
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 HIVE=(--debug:custom-hive "$W/hive")
 fail() { echo "check-template: $*" >&2; exit 1; }
+# zip_has <zip> <path>: the zip holds that file. Never `unzip -l | grep -q`: grep -q leaves at the
+# first match, unzip dies of SIGPIPE writing the rest, and pipefail calls a zip that has the file a
+# failure (0.9.0's IL2CPP runner lists 4 more entries after the plugin, and the check went red).
+zip_has() { unzip -Z1 "$1" | grep -Fxc -- "$2" > /dev/null; }
 
 # The Workshop's check: bump the three together (the digest is in the release's gi-probe-linux-x64.sha256).
 GI_PROBE_VERSION=0.5.1
@@ -229,7 +233,7 @@ echo "workflow: OK"
   bash tools/fetch.sh >/dev/null
   dotnet build -c Release -p:TreatWarningsAsErrors=true -v q > build.log 2>&1 || { tail -20 build.log >&2; exit 1; }
   bash tools/make-astra-gi.sh >/dev/null
-  unzip -l astra-gi.zip | grep -q 'BepInEx/plugins/AstraHostile/AstraHostile.dll'
+  zip_has astra-gi.zip BepInEx/plugins/AstraHostile/AstraHostile.dll
 ) || fail "the Mono project did not build and pack"
 echo "build and zip: OK"
 
@@ -262,8 +266,8 @@ echo "build and zip: OK"
   done
   bash tools/fetch.sh >/dev/null || exit 1
   bash tools/make-astra-gi.sh >/dev/null || exit 1
-  unzip -l astra-gi.zip | grep -q 'BepInEx/plugins/AstraMyGame/AstraMyGame.dll' || exit 1
-  unzip -l astra-gi.zip | grep -q 'BepInEx/plugins/AstraMyGame/astra-item.json' || exit 1
+  zip_has astra-gi.zip BepInEx/plugins/AstraMyGame/AstraMyGame.dll || exit 1
+  zip_has astra-gi.zip BepInEx/plugins/AstraMyGame/astra-item.json || exit 1
 ) || fail "the default IL2CPP project did not pack its committed build"
 
 # The Workshop's own check on both. A finding of any kind fails: the template is what a community

@@ -21,9 +21,9 @@ RUNNER=astra-gi-il2cpp.zip
 # release   Astra.Unity.Sdk.<release>.nupkg                                    the runner zip
 case "$VERSION" in
 #if (mono)
-  0.8.1) SDK_SHA256=46caca2886458fd2952bb8f28daee23825f35b8ffe5f04dd335ad5800f492768; RUNNER_SHA256=1ea3ef142e718afeffc9bbbc9dfab12e04a14d657d97524d9e7ba2225789a687 ;;
+  0.9.0) SDK_SHA256=9f91b61d0cb767f328f36b091320a550175e58eb4873eb65d66f04bae1c94eb5; RUNNER_SHA256=b5ab5e2dad288e7490617b48eab0ca19488bbd4db4510044a660564e97a752c8 ;;
 #else
-  0.8.1) SDK_SHA256=46caca2886458fd2952bb8f28daee23825f35b8ffe5f04dd335ad5800f492768; RUNNER_SHA256=42c8e2b1bddcd5e62d9f87eaccc78c6beed9d7306028ea4706a50c2a08a7d20e ;;
+  0.9.0) SDK_SHA256=9f91b61d0cb767f328f36b091320a550175e58eb4873eb65d66f04bae1c94eb5; RUNNER_SHA256=fa1b0c10e99b3961f4037e85e320895adab2bc80e82f2eee600d12d014b03432 ;;
 #endif
   *) echo "fetch.sh: no digests for Astra '$VERSION' (AstraVersion in AstraIntegration.csproj): add its line to this script's table" >&2; exit 1 ;;
 esac
